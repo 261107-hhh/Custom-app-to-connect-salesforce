@@ -92,7 +92,18 @@ const el = {
   modalRecordId: document.getElementById('modalRecordId'),
   modalJsonDisplay: document.getElementById('modalJsonDisplay'),
   btnCloseModal: document.getElementById('btnCloseModal'),
-  btnCopyJson: document.getElementById('btnCopyJson')
+  btnCopyJson: document.getElementById('btnCopyJson'),
+
+  // Create Record
+  btnCreateRecord: document.getElementById('btnCreateRecord'),
+  createRecordModal: document.getElementById('createRecordModal'),
+  btnCloseCreateModal: document.getElementById('btnCloseCreateModal'),
+  createObjectSelector: document.getElementById('createObjectSelector'),
+  createFieldsLoading: document.getElementById('createFieldsLoading'),
+  createFieldsContainer: document.getElementById('createFieldsContainer'),
+  createFeedback: document.getElementById('createFeedback'),
+  btnCancelCreate: document.getElementById('btnCancelCreate'),
+  btnSubmitCreate: document.getElementById('btnSubmitCreate')
 };
 
 // --- INITIALIZATION ---
@@ -103,6 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupExplorerHandlers();
   setupHistoryHandlers();
   setupModal();
+  setupCreateRecordHandlers();
 
   await checkConnectionStatus();
   await refreshMetricsAndTables();
@@ -238,6 +250,8 @@ async function checkConnectionStatus() {
   } catch (err) {
     el.connectionStatusPill.className = 'connection-status-pill disconnected';
     el.connectionStatusText.textContent = 'Offline';
+  } finally {
+    updateCreateButtonState();
   }
 }
 
@@ -663,4 +677,246 @@ async function openRecordModal(objectName, id) {
 function escapeHtml(str) {
   if (typeof str !== 'string') return str;
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// --- CREATE RECORD ---
+let cachedCreatableFields = {};
+
+function setupCreateRecordHandlers() {
+  // Open modal
+  el.btnCreateRecord.addEventListener('click', () => {
+    el.createRecordModal.classList.add('open');
+    el.createFeedback.className = 'create-feedback';
+    el.createFeedback.textContent = '';
+    el.createObjectSelector.value = state.activeExplorerTable || '';
+    if (el.createObjectSelector.value) {
+      loadCreatableFields(el.createObjectSelector.value);
+    }
+  });
+
+  // Close modal
+  el.btnCloseCreateModal.addEventListener('click', closeCreateModal);
+  el.btnCancelCreate.addEventListener('click', closeCreateModal);
+  el.createRecordModal.addEventListener('click', (e) => {
+    if (e.target === el.createRecordModal) closeCreateModal();
+  });
+
+  // Object selector change
+  el.createObjectSelector.addEventListener('change', (e) => {
+    const objectName = e.target.value;
+    if (objectName) {
+      loadCreatableFields(objectName);
+    } else {
+      el.createFieldsContainer.innerHTML = '<p class="text-muted" style="text-align:center; padding: 2rem 0;">Select an object above to load its fields.</p>';
+      el.btnSubmitCreate.disabled = true;
+    }
+  });
+
+  // Submit
+  el.btnSubmitCreate.addEventListener('click', submitCreateRecord);
+}
+
+function closeCreateModal() {
+  el.createRecordModal.classList.remove('open');
+}
+
+function updateCreateButtonState() {
+  // Enable button only when connected to a real SF org (not mock)
+  const isLive = state.connection && state.connection.connected && !state.connection.isMock;
+  el.btnCreateRecord.disabled = !isLive;
+  el.btnCreateRecord.title = isLive
+    ? 'Create a new record in Salesforce'
+    : 'Connect to a real Salesforce org to create records';
+}
+
+async function loadCreatableFields(objectName) {
+  el.createFieldsLoading.style.display = 'flex';
+  el.createFieldsContainer.innerHTML = '';
+  el.btnSubmitCreate.disabled = true;
+  el.createFeedback.className = 'create-feedback';
+  el.createFeedback.textContent = '';
+
+  try {
+    // Use cache if available
+    if (cachedCreatableFields[objectName]) {
+      renderCreateFields(cachedCreatableFields[objectName]);
+      el.createFieldsLoading.style.display = 'none';
+      return;
+    }
+
+    const res = await fetch(`/api/objects/${objectName}/fields`);
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+
+    cachedCreatableFields[objectName] = json.data;
+    renderCreateFields(json.data);
+  } catch (err) {
+    el.createFieldsContainer.innerHTML = `<p style="color: #f87171; text-align:center; padding: 1rem;">Failed to load fields: ${escapeHtml(err.message)}</p>`;
+  } finally {
+    el.createFieldsLoading.style.display = 'none';
+  }
+}
+
+function renderCreateFields(fields) {
+  // Separate required fields from optional
+  const required = fields.filter(f => f.required);
+  const optional = fields.filter(f => !f.required);
+
+  // Prioritize common fields at the top of optional
+  const commonFieldNames = ['FirstName', 'LastName', 'Name', 'Email', 'Phone', 'Title', 'Company', 'Description', 'Website', 'Industry'];
+  const prioritized = [];
+  const remaining = [];
+  for (const f of optional) {
+    if (commonFieldNames.includes(f.name)) {
+      prioritized.push(f);
+    } else {
+      remaining.push(f);
+    }
+  }
+
+  // Only show the first 30 optional fields to avoid overwhelming the form
+  const shownOptional = [...prioritized, ...remaining].slice(0, 30);
+
+  let html = '<div class="create-fields-grid">';
+
+  // Required fields section
+  if (required.length > 0) {
+    html += '<div class="create-section-label">Required Fields</div>';
+    for (const field of required) {
+      html += renderFieldInput(field, true);
+    }
+  }
+
+  // Optional fields section
+  if (shownOptional.length > 0) {
+    html += '<div class="create-section-label">Optional Fields</div>';
+    for (const field of shownOptional) {
+      html += renderFieldInput(field, false);
+    }
+  }
+
+  html += '</div>';
+  el.createFieldsContainer.innerHTML = html;
+  el.btnSubmitCreate.disabled = false;
+}
+
+function renderFieldInput(field, isRequired) {
+  const requiredStar = isRequired ? '<span class="required-star">*</span>' : '';
+  const reqAttr = isRequired ? 'required' : '';
+  const label = `<label>${escapeHtml(field.label)}${requiredStar}</label>`;
+
+  let input = '';
+
+  if (field.type === 'picklist' || field.type === 'multipicklist') {
+    const options = field.picklistValues.map(p =>
+      `<option value="${escapeHtml(p.value)}">${escapeHtml(p.label)}</option>`
+    ).join('');
+    input = `<select data-field="${field.name}" ${reqAttr}><option value="">-- Select --</option>${options}</select>`;
+  } else if (field.type === 'boolean') {
+    input = `<select data-field="${field.name}" ${reqAttr}><option value="">-- Select --</option><option value="true">Yes</option><option value="false">No</option></select>`;
+  } else if (field.type === 'textarea' || field.type === 'url' || (field.length && field.length > 255)) {
+    input = `<textarea data-field="${field.name}" ${reqAttr} placeholder="${escapeHtml(field.label)}"></textarea>`;
+  } else if (field.type === 'date') {
+    input = `<input type="date" data-field="${field.name}" ${reqAttr}>`;
+  } else if (field.type === 'datetime') {
+    input = `<input type="datetime-local" data-field="${field.name}" ${reqAttr}>`;
+  } else if (field.type === 'double' || field.type === 'currency' || field.type === 'percent' || field.type === 'int') {
+    input = `<input type="number" step="any" data-field="${field.name}" ${reqAttr} placeholder="${escapeHtml(field.label)}">`;
+  } else if (field.type === 'email') {
+    input = `<input type="email" data-field="${field.name}" ${reqAttr} placeholder="${escapeHtml(field.label)}">`;
+  } else if (field.type === 'phone') {
+    input = `<input type="tel" data-field="${field.name}" ${reqAttr} placeholder="${escapeHtml(field.label)}">`;
+  } else {
+    input = `<input type="text" data-field="${field.name}" ${reqAttr} placeholder="${escapeHtml(field.label)}" ${field.length ? `maxlength="${field.length}"` : ''}>`;
+  }
+
+  const isWide = field.type === 'textarea' || (field.length && field.length > 255);
+  return `<div class="create-field-group${isWide ? ' full-width' : ''}">${label}${input}</div>`;
+}
+
+async function submitCreateRecord() {
+  const objectName = el.createObjectSelector.value;
+  if (!objectName) {
+    showCreateFeedback('Please select an object type.', 'error');
+    return;
+  }
+
+  // Collect form values
+  const fieldElements = el.createFieldsContainer.querySelectorAll('[data-field]');
+  const recordData = {};
+
+  for (const inputEl of fieldElements) {
+    const fieldName = inputEl.getAttribute('data-field');
+    let value = inputEl.value.trim();
+
+    if (value === '') continue; // Skip empty optional fields
+
+    // Type conversions
+    if (inputEl.type === 'number') {
+      value = parseFloat(value);
+      if (isNaN(value)) continue;
+    } else if (inputEl.tagName === 'SELECT' && (value === 'true' || value === 'false')) {
+      value = value === 'true';
+    } else if (inputEl.type === 'datetime-local' && value) {
+      value = new Date(value).toISOString();
+    }
+
+    recordData[fieldName] = value;
+  }
+
+  // Check required fields
+  const requiredEls = el.createFieldsContainer.querySelectorAll('[data-field][required]');
+  for (const reqEl of requiredEls) {
+    if (!reqEl.value.trim()) {
+      const label = reqEl.closest('.create-field-group')?.querySelector('label')?.textContent || reqEl.getAttribute('data-field');
+      showCreateFeedback(`Required field missing: ${label.replace('*', '')}`, 'error');
+      reqEl.focus();
+      return;
+    }
+  }
+
+  if (Object.keys(recordData).length === 0) {
+    showCreateFeedback('Please fill in at least one field.', 'error');
+    return;
+  }
+
+  // Disable button while submitting
+  el.btnSubmitCreate.disabled = true;
+  el.btnSubmitCreate.querySelector('svg')?.remove();
+  const origText = el.btnSubmitCreate.textContent;
+  el.btnSubmitCreate.textContent = 'Creating...';
+
+  try {
+    const res = await fetch(`/api/data/${objectName}/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(recordData)
+    });
+    const json = await res.json();
+
+    if (!json.success) throw new Error(json.error);
+
+    showCreateFeedback(`✓ ${json.data.message} (ID: ${json.data.id})`, 'success');
+
+    // Refresh the explorer table
+    state.activeExplorerTable = objectName;
+    await refreshMetricsAndTables();
+    await loadExplorerData();
+
+    // Close modal after a brief delay
+    setTimeout(() => closeCreateModal(), 2000);
+  } catch (err) {
+    showCreateFeedback(`✕ ${err.message}`, 'error');
+  } finally {
+    el.btnSubmitCreate.disabled = false;
+    el.btnSubmitCreate.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      Create in Salesforce
+    `;
+  }
+}
+
+function showCreateFeedback(msg, type) {
+  el.createFeedback.textContent = msg;
+  el.createFeedback.className = `create-feedback ${type}`;
 }

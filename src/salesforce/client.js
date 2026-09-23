@@ -266,8 +266,10 @@ class SalesforceClient {
   }
 
   getStatus() {
+    const isActuallyConnected = this.isMock ? !!this.connectionInfo.connected : !!this.conn;
     return {
       ...this.connectionInfo,
+      connected: isActuallyConnected,
       isMock: this.isMock
     };
   }
@@ -334,6 +336,66 @@ class SalesforceClient {
       }
       throw err;
     }
+  }
+
+  async createRecord(objectName, recordData) {
+    if (this.isMock) {
+      throw new Error('Creating records is not supported in Mock mode. Connect to a real Salesforce org first.');
+    }
+    if (!this.conn) {
+      throw new Error('Not connected to Salesforce. Please connect first.');
+    }
+
+    const apiVersion = this.conn.version || '60.0';
+    const apiEndpoint = `${this.conn.instanceUrl}/services/data/v${apiVersion}/sobjects/${objectName}`;
+    console.log(`[SF Create] API: POST ${apiEndpoint}`);
+    console.log(`[SF Create] Payload: ${JSON.stringify(recordData).substring(0, 300)}`);
+
+    try {
+      const result = await this.conn.sobject(objectName).create(recordData);
+
+      if (!result.success) {
+        const errMsg = (result.errors || []).map(e => e.message || JSON.stringify(e)).join('; ');
+        throw new Error(`Salesforce rejected the record: ${errMsg}`);
+      }
+
+      console.log(`[SF Create] Success! New ${objectName} Id: ${result.id}`);
+      return { success: true, id: result.id };
+    } catch (err) {
+      console.error(`[SF Create] ERROR: ${err.message}`);
+      if (err.errorCode) {
+        console.error(`[SF Create] Salesforce errorCode: ${err.errorCode}`);
+      }
+      throw err;
+    }
+  }
+
+  async getCreatableFields(objectName) {
+    if (this.isMock) {
+      throw new Error('Field introspection requires a live Salesforce connection.');
+    }
+    if (!this.conn) {
+      throw new Error('Not connected to Salesforce. Please connect first.');
+    }
+
+    const describeInfo = await this.conn.describe(objectName);
+    const creatableFields = (describeInfo.fields || [])
+      .filter(f => f.createable && !f.deprecatedAndHidden)
+      .map(f => ({
+        name: f.name,
+        label: f.label,
+        type: f.type,
+        required: !f.nillable && !f.defaultedOnCreate,
+        length: f.length || null,
+        picklistValues: (f.picklistValues || []).filter(p => p.active).map(p => ({
+          label: p.label,
+          value: p.value
+        })),
+        referenceTo: f.referenceTo || [],
+        defaultValue: f.defaultValue
+      }));
+
+    return creatableFields;
   }
 }
 

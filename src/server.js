@@ -155,6 +155,62 @@ app.get('/api/data/:objectName/:id', (req, res) => {
   }
 });
 
+// --- CREATE RECORD ENDPOINTS ---
+
+app.get('/api/objects/:name/fields', async (req, res) => {
+  try {
+    const fields = await sfClient.getCreatableFields(req.params.name);
+    res.json({ success: true, data: fields });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/data/:objectName/create', async (req, res) => {
+  try {
+    const { objectName } = req.params;
+    const recordData = req.body;
+
+    if (!recordData || Object.keys(recordData).length === 0) {
+      return res.status(400).json({ success: false, error: 'No field data provided.' });
+    }
+
+    // 1. Push to Salesforce
+    const createResult = await sfClient.createRecord(objectName, recordData);
+
+    // 2. Fetch the full record back from Salesforce to store locally
+    let fullRecord = { Id: createResult.id, ...recordData };
+    try {
+      const queryResult = await sfClient.query(
+        `SELECT Id, Name, SystemModstamp, LastModifiedDate, CreatedDate FROM ${objectName} WHERE Id = '${createResult.id}'`
+      );
+      if (queryResult.records && queryResult.records.length > 0) {
+        fullRecord = { ...queryResult.records[0], ...recordData, Id: createResult.id };
+      }
+    } catch (fetchErr) {
+      console.warn(`[Create] Could not fetch back full record: ${fetchErr.message}. Storing partial.`);
+    }
+
+    // 3. Store in local SQLite
+    try {
+      localDb.upsertRecords(objectName, [fullRecord]);
+    } catch (dbErr) {
+      console.warn(`[Create] Could not store record locally: ${dbErr.message}`);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: createResult.id,
+        objectName,
+        message: `${objectName} record created successfully in Salesforce!`
+      }
+    });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 // --- EXPORT DATA ENDPOINT ---
 
 app.get('/api/export/:objectName', (req, res) => {

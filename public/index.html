@@ -264,6 +264,11 @@
                 <input type="text" id="searchInput" placeholder="Search records..." class="input-search">
               </div>
 
+              <button class="btn btn-accent btn-sm" id="btnCreateRecord" title="Create a new record in Salesforce" disabled>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                New Record
+              </button>
+
               <div class="export-dropdown">
                 <button class="btn btn-secondary btn-sm" id="btnExportCsv">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -508,6 +513,50 @@
             <button class="btn btn-secondary btn-sm" id="btnCopyJson">Copy JSON</button>
           </div>
           <pre class="json-code-block" id="modalJsonDisplay"></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Create New Record -->
+    <div class="modal-backdrop" id="createRecordModal">
+      <div class="modal-card create-record-modal">
+        <div class="modal-header">
+          <div>
+            <h3>Create New Record</h3>
+            <p class="card-subtitle" style="margin-top:0.25rem;">Push a new record directly to Salesforce</p>
+          </div>
+          <button class="btn-modal-close" id="btnCloseCreateModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Salesforce Object</label>
+            <select class="form-control" id="createObjectSelector">
+              <option value="">-- Select Object --</option>
+              <option value="Account">Account</option>
+              <option value="Contact">Contact</option>
+              <option value="Opportunity">Opportunity</option>
+              <option value="Lead">Lead</option>
+            </select>
+          </div>
+
+          <div id="createFieldsLoading" class="create-fields-loading" style="display:none;">
+            <div class="spinner-sm"></div>
+            <span>Loading fields from Salesforce...</span>
+          </div>
+
+          <div id="createFieldsContainer" class="create-fields-container">
+            <p class="text-muted" style="text-align:center; padding: 2rem 0;">Select an object above to load its fields.</p>
+          </div>
+
+          <div class="create-feedback" id="createFeedback"></div>
+
+          <div class="create-submit-row">
+            <button class="btn btn-secondary" id="btnCancelCreate">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitCreate" disabled>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              Create in Salesforce
+            </button>
+          </div>
         </div>
       </div>
     </div>
