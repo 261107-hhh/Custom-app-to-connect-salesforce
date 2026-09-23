@@ -1,0 +1,28 @@
+{
+  "name": "salesforce-local-sync",
+  "version": "1.0.0",
+  "description": "Salesforce to Local Database Data Sync Application with Web Dashboard",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "sync": "node src/cli.js",
+    "test": "node tests/test.js"
+  },
+  "keywords": [
+    "salesforce",
+    "sqlite",
+    "sync",
+    "data-pipeline"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsforce": "^3.6.8"
+  }
+}
