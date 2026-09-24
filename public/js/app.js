@@ -93,6 +93,12 @@ const el = {
   modalJsonDisplay: document.getElementById('modalJsonDisplay'),
   btnCloseModal: document.getElementById('btnCloseModal'),
   btnCopyJson: document.getElementById('btnCopyJson'),
+  btnModalTabRelations: document.getElementById('btnModalTabRelations'),
+  btnModalTabJson: document.getElementById('btnModalTabJson'),
+  modalRelationsPanel: document.getElementById('modalRelationsPanel'),
+  modalJsonPanel: document.getElementById('modalJsonPanel'),
+  modalRelationsLoading: document.getElementById('modalRelationsLoading'),
+  modalRelationsContainer: document.getElementById('modalRelationsContainer'),
 
   // Create Record
   btnCreateRecord: document.getElementById('btnCreateRecord'),
@@ -541,19 +547,33 @@ async function loadExplorerData() {
       return;
     }
 
-    const displayCols = data.columns.slice(0, 7);
+    const isAccountTable = state.activeExplorerTable.toLowerCase() === 'account';
+    const displayCols = data.columns.filter(c => !c.startsWith('_')).slice(0, 7);
 
     el.localDataTableHead.innerHTML = `
       <tr>
-        ${displayCols.map(c => `<th>${c}</th>`).join('')}
+        ${displayCols.map(c => `<th>${c === 'Account_Name' ? 'Related Account' : c}</th>`).join('')}
+        ${isAccountTable ? '<th>Related</th>' : ''}
         <th style="text-align: right;">Action</th>
       </tr>
     `;
 
     if (data.records.length === 0) {
-      el.localDataTableBody.innerHTML = `<tr><td colspan="${displayCols.length + 1}" class="text-center">No records match your criteria.</td></tr>`;
+      el.localDataTableBody.innerHTML = `<tr><td colspan="${displayCols.length + (isAccountTable ? 2 : 1)}" class="text-center">No records match your criteria.</td></tr>`;
     } else {
       el.localDataTableBody.innerHTML = data.records.map(row => {
+        let relatedHtml = '';
+        if (isAccountTable) {
+          const contactCount = row._contact_count ?? 0;
+          const oppCount = row._opportunity_count ?? 0;
+          relatedHtml = `
+            <td>
+              <span class="rel-stat-pill btn-show-account-rel" data-id="${row.Id}" title="${contactCount} Contacts">👥 ${contactCount}</span>
+              <span class="rel-stat-pill btn-show-account-rel" data-id="${row.Id}" title="${oppCount} Deals">💼 ${oppCount}</span>
+            </td>
+          `;
+        }
+
         return `
           <tr>
             ${displayCols.map(col => {
@@ -561,24 +581,46 @@ async function loadExplorerData() {
               if (col === 'Id') {
                 return `<td class="cell-id">${escapeHtml(String(val || ''))}</td>`;
               }
+              if (col === 'Account_Name' || (col === 'AccountId' && row.AccountId)) {
+                const accLabel = row.Account_Name || row.AccountId;
+                return `<td><span class="account-pill" data-account-id="${escapeHtml(row.AccountId)}" title="View Account Details">🏢 ${escapeHtml(accLabel)}</span></td>`;
+              }
               if (col.toLowerCase().includes('date') || col.toLowerCase().includes('stamp')) {
                 return `<td class="cell-date">${val ? new Date(val).toLocaleString() : '-'}</td>`;
               }
               return `<td>${escapeHtml(String(val ?? '-'))}</td>`;
             }).join('')}
+            ${relatedHtml}
             <td style="text-align: right;">
-              <button class="btn btn-secondary btn-sm btn-view-json" data-id="${row.Id}">
-                View JSON
+              <button class="btn btn-secondary btn-sm btn-view-details" data-id="${row.Id}">
+                View Details
               </button>
             </td>
           </tr>
         `;
       }).join('');
 
-      document.querySelectorAll('.btn-view-json').forEach(btn => {
+      document.querySelectorAll('.btn-view-details').forEach(btn => {
         btn.addEventListener('click', () => {
           const id = btn.getAttribute('data-id');
           openRecordModal(state.activeExplorerTable, id);
+        });
+      });
+
+      document.querySelectorAll('.btn-show-account-rel').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-id');
+          openRecordModal('Account', id);
+        });
+      });
+
+      document.querySelectorAll('.account-pill').forEach(pill => {
+        pill.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const accId = pill.getAttribute('data-account-id');
+          if (accId) {
+            openRecordModal('Account', accId);
+          }
         });
       });
     }
@@ -655,23 +697,316 @@ function setupModal() {
     el.btnCopyJson.textContent = 'Copied!';
     setTimeout(() => el.btnCopyJson.textContent = 'Copy JSON', 1500);
   });
+
+  el.btnModalTabRelations.addEventListener('click', () => {
+    switchModalTab('relations');
+  });
+
+  el.btnModalTabJson.addEventListener('click', () => {
+    switchModalTab('json');
+  });
+}
+
+function switchModalTab(tab) {
+  if (tab === 'relations') {
+    el.btnModalTabRelations.classList.add('active');
+    el.btnModalTabJson.classList.remove('active');
+    el.modalRelationsPanel.style.display = 'block';
+    el.modalJsonPanel.style.display = 'none';
+  } else {
+    el.btnModalTabJson.classList.add('active');
+    el.btnModalTabRelations.classList.remove('active');
+    el.modalRelationsPanel.style.display = 'none';
+    el.modalJsonPanel.style.display = 'block';
+  }
 }
 
 async function openRecordModal(objectName, id) {
   try {
-    const res = await fetch(`/api/data/${objectName}/${id}`);
-    const json = await res.json();
-    const rec = json.data;
+    switchModalTab('relations');
+    el.modalRecordTitle.textContent = `${objectName} Details`;
+    el.modalRecordId.textContent = id;
+    el.modalRelationsLoading.style.display = 'flex';
+    el.modalRelationsContainer.innerHTML = '';
+    el.recordModal.classList.add('open');
 
-    el.modalRecordTitle.textContent = `${objectName} Record`;
-    el.modalRecordId.textContent = rec.Id;
+    // Parallel fetch: full raw record + related bundle
+    const [rawRes, relRes] = await Promise.all([
+      fetch(`/api/data/${objectName}/${id}`),
+      fetch(`/api/data/${objectName}/${id}/related`)
+    ]);
+
+    const rawJson = await rawRes.json();
+    const relJson = await relRes.json();
+
+    const rec = rawJson.data || {};
+    const rel = relJson.data || {};
 
     const payload = rec._parsed_raw_data || rec;
     el.modalJsonDisplay.textContent = JSON.stringify(payload, null, 2);
-    el.recordModal.classList.add('open');
+
+    renderModalRelations(objectName, id, rec, rel);
   } catch (err) {
-    alert('Failed to load record details');
+    console.error('Failed to load record details:', err);
+    el.modalRelationsContainer.innerHTML = `<p style="color: #f87171; text-align:center; padding: 2rem;">Failed to load details: ${escapeHtml(err.message)}</p>`;
+  } finally {
+    el.modalRelationsLoading.style.display = 'none';
   }
+}
+
+function renderModalRelations(objectName, id, rec, rel) {
+  const lower = objectName.toLowerCase();
+  let html = '<div class="rel-container">';
+
+  // 1. Overview card (Summary fields)
+  html += `
+    <div class="rel-overview-card">
+      <div class="rel-overview-header">
+        <div class="rel-overview-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          ${escapeHtml(rec.Name || id)}
+        </div>
+        <span class="badge badge-sm badge-info">${escapeHtml(objectName)}</span>
+      </div>
+      <div class="rel-meta-grid">
+  `;
+
+  if (lower === 'account') {
+    html += `
+      <div class="rel-meta-item"><span class="rel-meta-label">Type</span><span class="rel-meta-value">${escapeHtml(rec.Type || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Industry</span><span class="rel-meta-value">${escapeHtml(rec.Industry || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Phone</span><span class="rel-meta-value">${escapeHtml(rec.Phone || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Website</span><span class="rel-meta-value">${escapeHtml(rec.Website || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Billing City</span><span class="rel-meta-value">${escapeHtml(rec.BillingCity || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Annual Revenue</span><span class="rel-meta-value">${rec.AnnualRevenue ? '$' + Number(rec.AnnualRevenue).toLocaleString() : '-'}</span></div>
+    `;
+  } else if (lower === 'contact') {
+    html += `
+      <div class="rel-meta-item"><span class="rel-meta-label">Title</span><span class="rel-meta-value">${escapeHtml(rec.Title || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Email</span><span class="rel-meta-value">${escapeHtml(rec.Email || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Phone</span><span class="rel-meta-value">${escapeHtml(rec.Phone || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Department</span><span class="rel-meta-value">${escapeHtml(rec.Department || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Created Date</span><span class="rel-meta-value">${rec.CreatedDate ? new Date(rec.CreatedDate).toLocaleDateString() : '-'}</span></div>
+    `;
+  } else if (lower === 'opportunity') {
+    html += `
+      <div class="rel-meta-item"><span class="rel-meta-label">Stage</span><span class="rel-meta-value">${escapeHtml(rec.StageName || '-')}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Amount</span><span class="rel-meta-value">${rec.Amount ? '$' + Number(rec.Amount).toLocaleString() : '-'}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Close Date</span><span class="rel-meta-value">${rec.CloseDate || '-'}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Probability</span><span class="rel-meta-value">${rec.Probability ? rec.Probability + '%' : '-'}</span></div>
+      <div class="rel-meta-item"><span class="rel-meta-label">Type</span><span class="rel-meta-value">${escapeHtml(rec.Type || '-')}</span></div>
+    `;
+  } else {
+    const sampleKeys = Object.keys(rec).filter(k => !k.startsWith('_') && k !== 'raw_data' && k !== 'Id' && k !== 'Name').slice(0, 6);
+    for (const k of sampleKeys) {
+      html += `<div class="rel-meta-item"><span class="rel-meta-label">${escapeHtml(k)}</span><span class="rel-meta-value">${escapeHtml(String(rec[k] ?? '-'))}</span></div>`;
+    }
+  }
+
+  html += `
+      </div>
+    </div>
+  `;
+
+  // 2. Relational sections based on object type
+  if (lower === 'account') {
+    // Related Contacts Section
+    const contacts = rel.contacts || [];
+    html += `
+      <div class="rel-section-card">
+        <div class="rel-section-header">
+          <div class="rel-section-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            Related Contacts
+            <span class="rel-count-badge">${contacts.length}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm btn-add-rel-record" data-object="Contact" data-account-id="${id}">
+            + Add Contact
+          </button>
+        </div>
+        ${contacts.length === 0 ? '<div class="rel-empty-msg">No contacts linked to this account yet.</div>' : `
+          <table class="rel-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Title</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th style="text-align:right;">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${contacts.map(c => `
+                <tr>
+                  <td><strong>${escapeHtml(c.Name || '-')}</strong></td>
+                  <td>${escapeHtml(c.Title || '-')}</td>
+                  <td>${escapeHtml(c.Email || '-')}</td>
+                  <td>${escapeHtml(c.Phone || '-')}</td>
+                  <td style="text-align:right;">
+                    <button class="btn btn-secondary btn-sm btn-open-subrecord" data-object="Contact" data-id="${c.Id}">View</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `}
+      </div>
+    `;
+
+    // Related Opportunities Section
+    const opps = rel.opportunities || [];
+    html += `
+      <div class="rel-section-card">
+        <div class="rel-section-header">
+          <div class="rel-section-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            Related Opportunities
+            <span class="rel-count-badge">${opps.length}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm btn-add-rel-record" data-object="Opportunity" data-account-id="${id}">
+            + Add Opportunity
+          </button>
+        </div>
+        ${opps.length === 0 ? '<div class="rel-empty-msg">No opportunities linked to this account yet.</div>' : `
+          <table class="rel-table">
+            <thead>
+              <tr>
+                <th>Deal Name</th>
+                <th>Stage</th>
+                <th>Amount</th>
+                <th>Close Date</th>
+                <th style="text-align:right;">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${opps.map(o => `
+                <tr>
+                  <td><strong>${escapeHtml(o.Name || '-')}</strong></td>
+                  <td><span class="badge badge-sm badge-info">${escapeHtml(o.StageName || '-')}</span></td>
+                  <td>${o.Amount ? '$' + Number(o.Amount).toLocaleString() : '-'}</td>
+                  <td>${o.CloseDate || '-'}</td>
+                  <td style="text-align:right;">
+                    <button class="btn btn-secondary btn-sm btn-open-subrecord" data-object="Opportunity" data-id="${o.Id}">View</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `}
+      </div>
+    `;
+  } else if (lower === 'contact' || lower === 'opportunity') {
+    // Parent Account Card
+    const acc = rel.account;
+    html += `
+      <div class="rel-section-card">
+        <div class="rel-section-header">
+          <div class="rel-section-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Mapped Parent Account
+          </div>
+          ${acc ? `<button class="btn btn-secondary btn-sm btn-open-subrecord" data-object="Account" data-id="${acc.Id}">View Account</button>` : ''}
+        </div>
+        ${!acc ? '<div class="rel-empty-msg">This record is not mapped to an Account yet.</div>' : `
+          <div style="padding: 1.15rem;">
+            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom: 0.75rem;">
+              <span class="account-pill" style="font-size: 0.95rem; padding: 0.35rem 0.85rem;" data-account-id="${acc.Id}">
+                🏢 ${escapeHtml(acc.Name)}
+              </span>
+              <span class="badge badge-sm badge-info">${escapeHtml(acc.Type || 'Account')}</span>
+            </div>
+            <div class="rel-meta-grid">
+              <div class="rel-meta-item"><span class="rel-meta-label">Industry</span><span class="rel-meta-value">${escapeHtml(acc.Industry || '-')}</span></div>
+              <div class="rel-meta-item"><span class="rel-meta-label">Phone</span><span class="rel-meta-value">${escapeHtml(acc.Phone || '-')}</span></div>
+              <div class="rel-meta-item"><span class="rel-meta-label">Website</span><span class="rel-meta-value">${escapeHtml(acc.Website || '-')}</span></div>
+              <div class="rel-meta-item"><span class="rel-meta-label">City</span><span class="rel-meta-value">${escapeHtml(acc.BillingCity || '-')}</span></div>
+            </div>
+          </div>
+        `}
+      </div>
+    `;
+
+    // Sibling Opportunities / Contacts
+    if (lower === 'contact' && rel.opportunities && rel.opportunities.length > 0) {
+      html += `
+        <div class="rel-section-card">
+          <div class="rel-section-header">
+            <div class="rel-section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              Account Deals (${rel.opportunities.length})
+            </div>
+          </div>
+          <table class="rel-table">
+            <thead><tr><th>Deal Name</th><th>Stage</th><th>Amount</th><th>Close Date</th></tr></thead>
+            <tbody>
+              ${rel.opportunities.map(o => `
+                <tr>
+                  <td><strong>${escapeHtml(o.Name || '-')}</strong></td>
+                  <td><span class="badge badge-sm badge-info">${escapeHtml(o.StageName || '-')}</span></td>
+                  <td>${o.Amount ? '$' + Number(o.Amount).toLocaleString() : '-'}</td>
+                  <td>${o.CloseDate || '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (lower === 'opportunity' && rel.contacts && rel.contacts.length > 0) {
+      html += `
+        <div class="rel-section-card">
+          <div class="rel-section-header">
+            <div class="rel-section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+              Account Contacts (${rel.contacts.length})
+            </div>
+          </div>
+          <table class="rel-table">
+            <thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Phone</th></tr></thead>
+            <tbody>
+              ${rel.contacts.map(c => `
+                <tr>
+                  <td><strong>${escapeHtml(c.Name || '-')}</strong></td>
+                  <td>${escapeHtml(c.Title || '-')}</td>
+                  <td>${escapeHtml(c.Email || '-')}</td>
+                  <td>${escapeHtml(c.Phone || '-')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+  }
+
+  html += '</div>';
+  el.modalRelationsContainer.innerHTML = html;
+
+  // Setup click handlers inside modal
+  el.modalRelationsContainer.querySelectorAll('.btn-open-subrecord').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const obj = btn.getAttribute('data-object');
+      const subId = btn.getAttribute('data-id');
+      openRecordModal(obj, subId);
+    });
+  });
+
+  el.modalRelationsContainer.querySelectorAll('.btn-add-rel-record').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const obj = btn.getAttribute('data-object');
+      const accId = btn.getAttribute('data-account-id');
+      openCreateModalWithPrefill(obj, accId);
+    });
+  });
+}
+
+function openCreateModalWithPrefill(objectName, accountId) {
+  el.recordModal.classList.remove('open');
+  state.prefillAccountId = accountId;
+  el.createRecordModal.classList.add('open');
+  el.createFeedback.className = 'create-feedback';
+  el.createFeedback.textContent = '';
+  el.createObjectSelector.value = objectName;
+  loadCreatableFields(objectName);
 }
 
 function escapeHtml(str) {
@@ -718,6 +1053,32 @@ function setupCreateRecordHandlers() {
 
 function closeCreateModal() {
   el.createRecordModal.classList.remove('open');
+  state.prefillAccountId = null;
+}
+
+let lookupCache = {};
+async function fetchLookupOptions(objectName, fieldName) {
+  try {
+    let options = lookupCache[objectName];
+    if (!options) {
+      const res = await fetch(`/api/lookups/${objectName}`);
+      const json = await res.json();
+      options = json.data || [];
+      lookupCache[objectName] = options;
+    }
+    const select = el.createFieldsContainer.querySelector(`select[data-field="${fieldName}"]`);
+    if (!select) return;
+    const currentVal = select.value;
+    select.innerHTML = `<option value="">-- Select Related Account --</option>` +
+      options.map(opt => `<option value="${escapeHtml(opt.id)}">${escapeHtml(opt.name)}</option>`).join('');
+    if (state.prefillAccountId && fieldName === 'AccountId') {
+      select.value = state.prefillAccountId;
+    } else if (currentVal) {
+      select.value = currentVal;
+    }
+  } catch (err) {
+    console.error('Failed to load lookups:', err);
+  }
 }
 
 function updateCreateButtonState() {
@@ -763,7 +1124,7 @@ function renderCreateFields(fields) {
   const optional = fields.filter(f => !f.required);
 
   // Prioritize common fields at the top of optional
-  const commonFieldNames = ['FirstName', 'LastName', 'Name', 'Email', 'Phone', 'Title', 'Company', 'Description', 'Website', 'Industry'];
+  const commonFieldNames = ['AccountId', 'FirstName', 'LastName', 'Name', 'Email', 'Phone', 'Title', 'Company', 'Description', 'Website', 'Industry'];
   const prioritized = [];
   const remaining = [];
   for (const f of optional) {
@@ -807,7 +1168,12 @@ function renderFieldInput(field, isRequired) {
 
   let input = '';
 
-  if (field.type === 'picklist' || field.type === 'multipicklist') {
+  const isAccountLookup = field.name === 'AccountId' || (field.type === 'reference' && field.referenceTo && field.referenceTo.includes('Account'));
+
+  if (isAccountLookup) {
+    input = `<select data-field="${field.name}" ${reqAttr} class="form-control select-account-lookup"><option value="">-- Select Related Account --</option></select>`;
+    fetchLookupOptions('Account', field.name);
+  } else if (field.type === 'picklist' || field.type === 'multipicklist') {
     const options = field.picklistValues.map(p =>
       `<option value="${escapeHtml(p.value)}">${escapeHtml(p.label)}</option>`
     ).join('');

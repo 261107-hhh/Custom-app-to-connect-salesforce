@@ -155,6 +155,31 @@ app.get('/api/data/:objectName/:id', (req, res) => {
   }
 });
 
+// --- RELATIONAL & LOOKUP ENDPOINTS ---
+
+app.get('/api/lookups/:objectName', (req, res) => {
+  try {
+    const { objectName } = req.params;
+    const options = localDb.getLookupOptions(objectName);
+    res.json({ success: true, data: options });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/data/:objectName/:id/related', (req, res) => {
+  try {
+    const { objectName, id } = req.params;
+    const related = localDb.getRelatedRecords(objectName, id);
+    if (!related) {
+      return res.status(404).json({ success: false, error: 'Record not found' });
+    }
+    res.json({ success: true, data: related });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // --- CREATE RECORD ENDPOINTS ---
 
 app.get('/api/objects/:name/fields', async (req, res) => {

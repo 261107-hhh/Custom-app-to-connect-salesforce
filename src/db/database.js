@@ -148,7 +148,7 @@ export class LocalDatabase {
         this.db.exec('COMMIT');
         return result;
       } catch (err) {
-        try { this.db.exec('ROLLBACK'); } catch { }
+        try { this.db.exec('ROLLBACK'); } catch {}
         throw err;
       }
     };
@@ -288,7 +288,7 @@ export class LocalDatabase {
 
   queryRecords(objectName, { page = 1, limit = 20, search = '', sortBy = 'LastModifiedDate', sortOrder = 'DESC' } = {}) {
     const tableName = this.getTableName(objectName);
-
+    
     // Check if table exists
     const tableExists = this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`).get(tableName);
     if (!tableExists) {
@@ -299,32 +299,67 @@ export class LocalDatabase {
     const columnNames = cols.map(c => c.name).filter(c => c !== 'raw_data');
 
     // Safe sort column check
-    const validSortCol = cols.some(c => c.name.toLowerCase() === sortBy.toLowerCase()) ? sortBy : 'Id';
+    const validSortCol = cols.some(c => c.name.toLowerCase() === sortBy.toLowerCase()) ? `t."${sortBy}"` : 't."Id"';
     const validOrder = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-    let whereClause = '';
+    const lowerObj = objectName.toLowerCase();
+    const hasAccountTable = !!this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'sf_account'").get();
+    const hasContactTable = !!this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'sf_contact'").get();
+    const hasOppTable = !!this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'sf_opportunity'").get();
+
+    let selectClause = 't.*';
+    let joinClause = '';
+
+    // Relational joins
+    if ((lowerObj === 'contact' || lowerObj === 'opportunity') && hasAccountTable) {
+      selectClause += ', a.Name AS Account_Name';
+      joinClause += ' LEFT JOIN "sf_account" a ON t.AccountId = a.Id';
+      if (!columnNames.includes('Account_Name')) {
+        const accIdx = columnNames.indexOf('AccountId');
+        if (accIdx !== -1) {
+          columnNames.splice(accIdx + 1, 0, 'Account_Name');
+        } else {
+          columnNames.push('Account_Name');
+        }
+      }
+    } else if (lowerObj === 'account') {
+      if (hasContactTable) {
+        selectClause += ', (SELECT COUNT(*) FROM "sf_contact" WHERE AccountId = t.Id) AS _contact_count';
+      }
+      if (hasOppTable) {
+        selectClause += ', (SELECT COUNT(*) FROM "sf_opportunity" WHERE AccountId = t.Id) AS _opportunity_count';
+      }
+    }
+
+    const whereClauses = [];
     const params = [];
 
     if (search && search.trim() !== '') {
       const term = `%${search.trim()}%`;
-      const searchCols = cols.filter(c => c.type === 'TEXT' && c.name !== 'raw_data').map(c => `"${c.name}" LIKE ?`);
+      const searchCols = cols.filter(c => c.type === 'TEXT' && c.name !== 'raw_data').map(c => `t."${c.name}" LIKE ?`);
+      if (joinClause.includes('sf_account')) {
+        searchCols.push('a.Name LIKE ?');
+      }
       if (searchCols.length > 0) {
-        whereClause = `WHERE (${searchCols.join(' OR ')})`;
+        whereClauses.push(`(${searchCols.join(' OR ')})`);
         for (let i = 0; i < searchCols.length; i++) params.push(term);
       }
     }
 
-    const totalRow = this.db.prepare(`SELECT COUNT(*) as count FROM "${tableName}" ${whereClause}`).get(...params);
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const totalRow = this.db.prepare(`SELECT COUNT(*) as count FROM "${tableName}" t ${joinClause} ${whereSql}`).get(...params);
     const total = totalRow ? totalRow.count : 0;
 
     const offset = Math.max(0, (page - 1) * limit);
     const querySql = `
-      SELECT * FROM "${tableName}" 
-      ${whereClause} 
-      ORDER BY "${validSortCol}" ${validOrder} 
+      SELECT ${selectClause} FROM "${tableName}" t
+      ${joinClause}
+      ${whereSql} 
+      ORDER BY ${validSortCol} ${validOrder} 
       LIMIT ? OFFSET ?
     `;
-
+    
     const records = this.db.prepare(querySql).all(...params, limit, offset);
 
     return {
@@ -348,6 +383,69 @@ export class LocalDatabase {
       }
     }
     return row;
+  }
+
+  getRelatedRecords(objectName, id) {
+    const lower = objectName.toLowerCase();
+    const record = this.getRecordById(objectName, id);
+    if (!record) return null;
+
+    const result = { objectName, id, record };
+    const hasTable = (t) => !!this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(t);
+
+    if (lower === 'account') {
+      if (hasTable('sf_contact')) {
+        result.contacts = this.db.prepare('SELECT Id, Name, Email, Phone, Title FROM "sf_contact" WHERE AccountId = ? ORDER BY Name ASC').all(id);
+      } else {
+        result.contacts = [];
+      }
+      if (hasTable('sf_opportunity')) {
+        result.opportunities = this.db.prepare('SELECT Id, Name, StageName, Amount, CloseDate, Probability FROM "sf_opportunity" WHERE AccountId = ? ORDER BY CloseDate DESC').all(id);
+      } else {
+        result.opportunities = [];
+      }
+    } else if (lower === 'contact') {
+      const accountId = record.AccountId;
+      if (accountId && hasTable('sf_account')) {
+        result.account = this.db.prepare('SELECT Id, Name, Type, Industry, Phone, Website, BillingCity FROM "sf_account" WHERE Id = ?').get(accountId) || null;
+      } else {
+        result.account = null;
+      }
+      if (accountId && hasTable('sf_opportunity')) {
+        result.opportunities = this.db.prepare('SELECT Id, Name, StageName, Amount, CloseDate FROM "sf_opportunity" WHERE AccountId = ? ORDER BY CloseDate DESC').all(accountId);
+      } else {
+        result.opportunities = [];
+      }
+    } else if (lower === 'opportunity') {
+      const accountId = record.AccountId;
+      if (accountId && hasTable('sf_account')) {
+        result.account = this.db.prepare('SELECT Id, Name, Type, Industry, Phone, Website, BillingCity FROM "sf_account" WHERE Id = ?').get(accountId) || null;
+      } else {
+        result.account = null;
+      }
+      if (accountId && hasTable('sf_contact')) {
+        result.contacts = this.db.prepare('SELECT Id, Name, Email, Phone, Title FROM "sf_contact" WHERE AccountId = ? ORDER BY Name ASC').all(accountId);
+      } else {
+        result.contacts = [];
+      }
+    }
+
+    return result;
+  }
+
+  getLookupOptions(objectName) {
+    const tableName = this.getTableName(objectName);
+    const tableExists = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(tableName);
+    if (!tableExists) return [];
+
+    const cols = this.db.prepare(`PRAGMA table_info("${tableName}")`).all().map(c => c.name);
+    const hasName = cols.includes('Name');
+
+    const sql = hasName
+      ? `SELECT Id as id, Name as name FROM "${tableName}" ORDER BY Name ASC LIMIT 200`
+      : `SELECT Id as id, Id as name FROM "${tableName}" ORDER BY Id ASC LIMIT 200`;
+
+    return this.db.prepare(sql).all();
   }
 
   getAllRecordsForExport(objectName) {

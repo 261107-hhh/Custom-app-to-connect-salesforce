@@ -497,9 +497,9 @@
 
     </main>
 
-    <!-- Modal: View Full Record Raw JSON -->
+    <!-- Modal: View Record Details & Relationships -->
     <div class="modal-backdrop" id="recordModal">
-      <div class="modal-card">
+      <div class="modal-card record-detail-modal">
         <div class="modal-header">
           <div>
             <h3 id="modalRecordTitle">Record Details</h3>
@@ -507,12 +507,38 @@
           </div>
           <button class="btn-modal-close" id="btnCloseModal">&times;</button>
         </div>
+        
+        <div class="modal-subnav">
+          <button class="modal-subnav-btn active" id="btnModalTabRelations" data-modal-tab="relations">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            Relationships & Overview
+          </button>
+          <button class="modal-subnav-btn" id="btnModalTabJson" data-modal-tab="json">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            Raw JSON Payload
+          </button>
+        </div>
+
         <div class="modal-body">
-          <div class="modal-toolbar">
-            <span class="raw-data-label">Salesforce Raw Payload (Complete Object JSON)</span>
-            <button class="btn btn-secondary btn-sm" id="btnCopyJson">Copy JSON</button>
+          <!-- Tab 1: Relationships & Overview -->
+          <div id="modalRelationsPanel" class="modal-tab-content active">
+            <div id="modalRelationsLoading" class="create-fields-loading" style="display:none;">
+              <div class="spinner-sm"></div>
+              <span>Loading relationship mapping...</span>
+            </div>
+            <div id="modalRelationsContainer">
+              <!-- Dynamically populated -->
+            </div>
           </div>
-          <pre class="json-code-block" id="modalJsonDisplay"></pre>
+
+          <!-- Tab 2: Raw JSON -->
+          <div id="modalJsonPanel" class="modal-tab-content" style="display:none;">
+            <div class="modal-toolbar">
+              <span class="raw-data-label">Salesforce Raw Payload (Complete Object JSON)</span>
+              <button class="btn btn-secondary btn-sm" id="btnCopyJson">Copy JSON</button>
+            </div>
+            <pre class="json-code-block" id="modalJsonDisplay"></pre>
+          </div>
         </div>
       </div>
     </div>
