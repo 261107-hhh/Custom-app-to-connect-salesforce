@@ -1,1 +1,28 @@
-node_modules
+# Maven Build Artifacts
+target/
+*.class
+
+# Package files
+*.jar
+*.war
+*.ear
+
+# Environment & credentials
+.env
+data/
+
+# IDE & Editor settings
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+
+# Log files
+*.log
+
+# OS generated files
+Thumbs.db
+Desktop.ini
+.DS_Store
