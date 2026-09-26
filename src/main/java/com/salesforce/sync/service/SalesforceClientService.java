@@ -298,6 +298,35 @@ public class SalesforceClientService {
         return objectMapper.readTree(response.body());
     }
 
+    public Map<String, Object> updateRecord(String objectName, String id, Map<String, Object> fields) throws Exception {
+        if (this.isMock) {
+            return mockSalesforceService.updateRecord(objectName, id, fields);
+        }
+        ensureConnected();
+
+        String endpoint = this.instanceUrl + "/services/data/v" + this.apiVersion + "/sobjects/" + objectName + "/" + id;
+        log.info("[SF Update] PATCH {}", endpoint);
+
+        String payloadJson = objectMapper.writeValueAsString(fields);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint))
+                .header("Authorization", "Bearer " + this.accessToken)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .timeout(Duration.ofSeconds(30))
+                .method("PATCH", HttpRequest.BodyPublishers.ofString(payloadJson))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 400) {
+            throw new RuntimeException("Salesforce Update failed (HTTP " + response.statusCode() + "): " + response.body());
+        }
+
+        log.info("[SF Update] Record {} updated successfully in Salesforce!", id);
+        return Map.of("success", true, "id", id, "objectName", objectName);
+    }
+
     public Map<String, Object> createRecord(String objectName, Map<String, Object> fields) throws Exception {
         if (this.isMock) {
             return mockSalesforceService.createRecord(objectName, fields);

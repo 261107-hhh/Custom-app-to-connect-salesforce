@@ -209,6 +209,35 @@ public class MockSalesforceService {
         return result;
     }
 
+    public Map<String, Object> updateRecord(String objectName, String id, Map<String, Object> fields) {
+        String canonicalObject = capitalize(objectName);
+        List<Map<String, Object>> list = dataStore.computeIfAbsent(canonicalObject, k -> new CopyOnWriteArrayList<>());
+        Map<String, Object> found = null;
+        for (Map<String, Object> rec : list) {
+            if (id.equals(rec.get("Id"))) {
+                found = rec;
+                break;
+            }
+        }
+        if (found == null) {
+            found = new LinkedHashMap<>();
+            found.put("Id", id);
+            list.add(found);
+        }
+        if (fields != null) {
+            found.putAll(fields);
+        }
+        String now = Instant.now().toString();
+        found.put("LastModifiedDate", now);
+        found.put("SystemModstamp", now);
+        if (fields != null && (fields.containsKey("FirstName") || fields.containsKey("LastName"))) {
+            String fn = Objects.toString(found.getOrDefault("FirstName", ""), "");
+            String ln = Objects.toString(found.getOrDefault("LastName", ""), "");
+            found.put("Name", (fn + " " + ln).trim());
+        }
+        return Map.of("success", true, "id", id, "objectName", canonicalObject, "record", found);
+    }
+
     public Map<String, Object> createRecord(String objectName, Map<String, Object> fields) {
         String canonicalObject = capitalize(objectName);
         String prefix = switch (canonicalObject) {

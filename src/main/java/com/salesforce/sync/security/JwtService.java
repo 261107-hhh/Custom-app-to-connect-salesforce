@@ -26,20 +26,40 @@ public class JwtService {
     }
 
     public String generateToken(String email, String name) {
+        return generateToken(email, name, null, null);
+    }
+
+    public String generateToken(String email, String name, String activeOrgId, String orgRole) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + jwtExpirationMs);
 
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(email)
                 .claim("name", name)
                 .issuedAt(now)
                 .expiration(expiryDate)
-                .signWith(getSigningKey())
-                .compact();
+                .signWith(getSigningKey());
+
+        if (activeOrgId != null && !activeOrgId.isBlank()) {
+            builder.claim("active_org_id", activeOrgId);
+        }
+        if (orgRole != null && !orgRole.isBlank()) {
+            builder.claim("org_role", orgRole);
+        }
+
+        return builder.compact();
     }
 
     public String extractEmail(String token) {
         return extractClaim(token, Claims::getSubject);
+    }
+
+    public String extractActiveOrgId(String token) {
+        return extractClaim(token, claims -> claims.get("active_org_id", String.class));
+    }
+
+    public String extractOrgRole(String token) {
+        return extractClaim(token, claims -> claims.get("org_role", String.class));
     }
 
     public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {

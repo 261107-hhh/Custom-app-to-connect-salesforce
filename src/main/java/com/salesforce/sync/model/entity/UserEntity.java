@@ -25,6 +25,9 @@ public class UserEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    private java.util.List<OrganizationMemberEntity> memberships = new java.util.ArrayList<>();
+
     public UserEntity() {}
 
     public UserEntity(String email, String password, String name) {

@@ -1,11 +1,18 @@
 package com.salesforce.sync.model.entity;
 
+import com.salesforce.sync.multitenancy.OrganizationContext;
 import jakarta.persistence.Column;
 import jakarta.persistence.MappedSuperclass;
+import jakarta.persistence.PrePersist;
+import org.hibernate.annotations.TenantId;
 import java.time.LocalDateTime;
 
 @MappedSuperclass
 public abstract class BaseAuditableEntity {
+
+    @TenantId
+    @Column(name = "organization_id", length = 64)
+    private String organizationId;
 
     @Column(name = "custom_app_created_by", length = 150)
     private String customAppCreatedBy;
@@ -25,6 +32,9 @@ public abstract class BaseAuditableEntity {
     @Column(name = "synced_by", length = 1000)
     private String syncedBy;
 
+    public String getOrganizationId() { return organizationId; }
+    public void setOrganizationId(String organizationId) { this.organizationId = organizationId; }
+
     public String getCustomAppCreatedBy() { return customAppCreatedBy; }
     public void setCustomAppCreatedBy(String customAppCreatedBy) { this.customAppCreatedBy = customAppCreatedBy; }
 
@@ -42,6 +52,13 @@ public abstract class BaseAuditableEntity {
 
     public String getSyncedBy() { return syncedBy; }
     public void setSyncedBy(String syncedBy) { this.syncedBy = syncedBy; }
+
+    @PrePersist
+    public void prePersistTenant() {
+        if (this.organizationId == null || this.organizationId.isBlank()) {
+            this.organizationId = OrganizationContext.getCurrentOrganization();
+        }
+    }
 
     /**
      * Records that a specific user has synchronized this record from Salesforce.

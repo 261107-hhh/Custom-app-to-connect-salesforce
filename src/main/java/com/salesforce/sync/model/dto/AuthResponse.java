@@ -1,11 +1,17 @@
 package com.salesforce.sync.model.dto;
 
+import java.util.List;
+
 public class AuthResponse {
     private boolean success;
     private String token;
     private String email;
     private String name;
     private String message;
+    private String activeOrgId;
+    private String activeOrgName;
+    private String activeOrgRole;
+    private List<OrgSummaryDto> organizations;
 
     public AuthResponse() {}
 
@@ -39,4 +45,16 @@ public class AuthResponse {
 
     public String getMessage() { return message; }
     public void setMessage(String message) { this.message = message; }
+
+    public String getActiveOrgId() { return activeOrgId; }
+    public void setActiveOrgId(String activeOrgId) { this.activeOrgId = activeOrgId; }
+
+    public String getActiveOrgName() { return activeOrgName; }
+    public void setActiveOrgName(String activeOrgName) { this.activeOrgName = activeOrgName; }
+
+    public String getActiveOrgRole() { return activeOrgRole; }
+    public void setActiveOrgRole(String activeOrgRole) { this.activeOrgRole = activeOrgRole; }
+
+    public List<OrgSummaryDto> getOrganizations() { return organizations; }
+    public void setOrganizations(List<OrgSummaryDto> organizations) { this.organizations = organizations; }
 }

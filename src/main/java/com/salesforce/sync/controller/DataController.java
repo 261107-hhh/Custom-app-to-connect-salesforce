@@ -49,11 +49,10 @@ public class DataController {
     @GetMapping("/tables")
     @Operation(summary = "List Synced Tables", description = "Returns summary of synced object tables and total record counts for authenticated user.")
     public ResponseEntity<?> getTables(Authentication authentication) {
-        String userEmail = SecurityUtils.resolveUserEmail(authentication);
-        long accCount = userEmail != null ? accountRepo.countByUser(userEmail) : 0L;
-        long conCount = userEmail != null ? contactRepo.countByUser(userEmail) : 0L;
-        long oppCount = userEmail != null ? opportunityRepo.countByUser(userEmail) : 0L;
-        long leadCount = userEmail != null ? leadRepo.countByUser(userEmail) : 0L;
+        long accCount = accountRepo.count();
+        long conCount = contactRepo.count();
+        long oppCount = opportunityRepo.count();
+        long leadCount = leadRepo.count();
 
         List<Map<String, Object>> tables = List.of(
                 Map.of("objectName", "Account", "tableName", "sf_account", "count", accCount),
@@ -103,7 +102,7 @@ public class DataController {
         List<String> columns = new ArrayList<>();
 
         if ("account".equals(lower)) {
-            Page<AccountEntity> accPage = accountRepo.searchAccountsByUser(userEmail, search, pageable);
+            Page<AccountEntity> accPage = accountRepo.searchAccounts(search, pageable);
             total = accPage.getTotalElements();
             totalPages = accPage.getTotalPages();
             columns = List.of("Id", "Name", "Type", "Industry", "Phone", "BillingCity", "custom_app_created_by", "synced_by");
@@ -116,17 +115,23 @@ public class DataController {
                 map.put("Industry", a.getIndustry());
                 map.put("Phone", a.getPhone());
                 map.put("BillingCity", a.getBillingCity());
+                map.put("AnnualRevenue", a.getAnnualRevenue());
+                map.put("Website", a.getWebsite());
+                map.put("CreatedDate", a.getCreatedDate());
+                map.put("LastModifiedDate", a.getLastModifiedDate());
                 map.put("raw_data", a.getRawData());
                 map.put("custom_app_created_by", a.getCustomAppCreatedBy());
                 map.put("custom_app_modified_by", a.getCustomAppModifiedBy());
                 map.put("is_custom_app_created", a.getIsCustomAppCreated());
                 map.put("synced_by", a.getSyncedBy());
+                map.put("custom_app_created_at", a.getCustomAppCreatedAt());
+                map.put("custom_app_modified_at", a.getCustomAppModifiedAt());
                 map.put("_contact_count", a.getContacts() != null ? a.getContacts().stream().filter(c -> c.isAssociatedWithUser(userEmail)).count() : 0);
                 map.put("_opportunity_count", a.getOpportunities() != null ? a.getOpportunities().stream().filter(o -> o.isAssociatedWithUser(userEmail)).count() : 0);
                 records.add(map);
             }
         } else if ("contact".equals(lower)) {
-            Page<ContactEntity> conPage = contactRepo.searchContactsByUser(userEmail, search, pageable);
+            Page<ContactEntity> conPage = contactRepo.searchContacts(search, pageable);
             total = conPage.getTotalElements();
             totalPages = conPage.getTotalPages();
             columns = List.of("Id", "Name", "Title", "Email", "Phone", "Account_Name", "custom_app_created_by", "synced_by");
@@ -138,6 +143,11 @@ public class DataController {
                 map.put("Title", c.getTitle());
                 map.put("Email", c.getEmail());
                 map.put("Phone", c.getPhone());
+                map.put("FirstName", c.getFirstName());
+                map.put("LastName", c.getLastName());
+                map.put("Department", c.getDepartment());
+                map.put("CreatedDate", c.getCreatedDate());
+                map.put("LastModifiedDate", c.getLastModifiedDate());
                 map.put("AccountId", c.getAccountId());
                 map.put("Account_Name", c.getAccountName());
                 map.put("raw_data", c.getRawData());
@@ -145,10 +155,12 @@ public class DataController {
                 map.put("custom_app_modified_by", c.getCustomAppModifiedBy());
                 map.put("is_custom_app_created", c.getIsCustomAppCreated());
                 map.put("synced_by", c.getSyncedBy());
+                map.put("custom_app_created_at", c.getCustomAppCreatedAt());
+                map.put("custom_app_modified_at", c.getCustomAppModifiedAt());
                 records.add(map);
             }
         } else if ("opportunity".equals(lower)) {
-            Page<OpportunityEntity> oppPage = opportunityRepo.searchOpportunitiesByUser(userEmail, search, pageable);
+            Page<OpportunityEntity> oppPage = opportunityRepo.searchOpportunities(search, pageable);
             total = oppPage.getTotalElements();
             totalPages = oppPage.getTotalPages();
             columns = List.of("Id", "Name", "StageName", "Amount", "CloseDate", "Account_Name", "custom_app_created_by", "synced_by");
@@ -160,6 +172,10 @@ public class DataController {
                 map.put("StageName", o.getStageName());
                 map.put("Amount", o.getAmount());
                 map.put("CloseDate", o.getCloseDate());
+                map.put("Type", o.getType());
+                map.put("Probability", o.getProbability());
+                map.put("CreatedDate", o.getCreatedDate());
+                map.put("LastModifiedDate", o.getLastModifiedDate());
                 map.put("AccountId", o.getAccountId());
                 map.put("Account_Name", o.getAccountName());
                 map.put("raw_data", o.getRawData());
@@ -167,10 +183,12 @@ public class DataController {
                 map.put("custom_app_modified_by", o.getCustomAppModifiedBy());
                 map.put("is_custom_app_created", o.getIsCustomAppCreated());
                 map.put("synced_by", o.getSyncedBy());
+                map.put("custom_app_created_at", o.getCustomAppCreatedAt());
+                map.put("custom_app_modified_at", o.getCustomAppModifiedAt());
                 records.add(map);
             }
         } else if ("lead".equals(lower)) {
-            Page<LeadEntity> leadPage = leadRepo.searchLeadsByUser(userEmail, search, pageable);
+            Page<LeadEntity> leadPage = leadRepo.searchLeads(search, pageable);
             total = leadPage.getTotalElements();
             totalPages = leadPage.getTotalPages();
             columns = List.of("Id", "Name", "Company", "Email", "Phone", "Status", "custom_app_created_by", "synced_by");
@@ -183,11 +201,18 @@ public class DataController {
                 map.put("Email", l.getEmail());
                 map.put("Phone", l.getPhone());
                 map.put("Status", l.getStatus());
+                map.put("FirstName", l.getFirstName());
+                map.put("LastName", l.getLastName());
+                map.put("Title", l.getTitle());
+                map.put("CreatedDate", l.getCreatedDate());
+                map.put("LastModifiedDate", l.getLastModifiedDate());
                 map.put("raw_data", l.getRawData());
                 map.put("custom_app_created_by", l.getCustomAppCreatedBy());
                 map.put("custom_app_modified_by", l.getCustomAppModifiedBy());
                 map.put("is_custom_app_created", l.getIsCustomAppCreated());
                 map.put("synced_by", l.getSyncedBy());
+                map.put("custom_app_created_at", l.getCustomAppCreatedAt());
+                map.put("custom_app_modified_at", l.getCustomAppModifiedAt());
                 records.add(map);
             }
         }
@@ -215,10 +240,10 @@ public class DataController {
 
         String lower = objectName.toLowerCase();
         Object record = null;
-        if ("account".equals(lower)) record = accountRepo.findByIdAndUser(id, userEmail).orElse(null);
-        else if ("contact".equals(lower)) record = contactRepo.findByIdAndUser(id, userEmail).orElse(null);
-        else if ("opportunity".equals(lower)) record = opportunityRepo.findByIdAndUser(id, userEmail).orElse(null);
-        else if ("lead".equals(lower)) record = leadRepo.findByIdAndUser(id, userEmail).orElse(null);
+        if ("account".equals(lower)) record = accountRepo.findById(id).orElse(null);
+        else if ("contact".equals(lower)) record = contactRepo.findById(id).orElse(null);
+        else if ("opportunity".equals(lower)) record = opportunityRepo.findById(id).orElse(null);
+        else if ("lead".equals(lower)) record = leadRepo.findById(id).orElse(null);
 
         if (record == null) {
             return ResponseEntity.status(404).body(Map.of("success", false, "error", "Record not found"));
@@ -285,12 +310,12 @@ public class DataController {
         bundle.put("id", id);
 
         if ("account".equals(lower)) {
-            Optional<AccountEntity> accOpt = accountRepo.findByIdAndUser(id, userEmail);
+            Optional<AccountEntity> accOpt = accountRepo.findById(id);
             if (accOpt.isEmpty()) return ResponseEntity.status(404).body(Map.of("success", false, "error", "Account not found"));
 
             bundle.put("account", accOpt.get());
-            bundle.put("contacts", contactRepo.findByAccountIdAndUser(id, userEmail));
-            bundle.put("opportunities", opportunityRepo.findByAccountIdAndUser(id, userEmail));
+            bundle.put("contacts", contactRepo.findByAccountId(id));
+            bundle.put("opportunities", opportunityRepo.findByAccountId(id));
         } else if ("contact".equals(lower)) {
             Optional<ContactEntity> conOpt = contactRepo.findByIdAndUser(id, userEmail);
             if (conOpt.isEmpty()) return ResponseEntity.status(404).body(Map.of("success", false, "error", "Contact not found"));
@@ -326,6 +351,160 @@ public class DataController {
         }
 
         return ResponseEntity.ok(Map.of("success", true, "data", bundle));
+    }
+
+    @PutMapping("/{objectName}/{id}")
+    @Operation(summary = "Update Record in Salesforce and Local Database", description = "Updates fields in Salesforce and stamps custom_app_modified_by with authenticated user.")
+    public ResponseEntity<?> updateRecord(
+            @PathVariable String objectName,
+            @PathVariable String id,
+            @RequestBody Map<String, Object> recordData,
+            Authentication authentication) {
+        try {
+            if (recordData == null || recordData.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("success", false, "error", "No field data provided for update."));
+            }
+
+            String userEmail = SecurityUtils.resolveUserEmail(authentication);
+            if (userEmail == null || userEmail.isBlank()) {
+                userEmail = "anonymous@app.local";
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> fieldsToUpdate = (recordData.containsKey("fields") && recordData.get("fields") instanceof Map)
+                    ? (Map<String, Object>) recordData.get("fields")
+                    : recordData;
+
+            // Remove non-updatable audit or read-only fields
+            fieldsToUpdate.remove("id");
+            fieldsToUpdate.remove("Id");
+            fieldsToUpdate.remove("CreatedDate");
+            fieldsToUpdate.remove("createdDate");
+            fieldsToUpdate.remove("LastModifiedDate");
+            fieldsToUpdate.remove("lastModifiedDate");
+            fieldsToUpdate.remove("SystemModstamp");
+            fieldsToUpdate.remove("systemModstamp");
+            fieldsToUpdate.remove("custom_app_created_by");
+            fieldsToUpdate.remove("custom_app_created_at");
+            fieldsToUpdate.remove("custom_app_modified_by");
+            fieldsToUpdate.remove("custom_app_modified_at");
+            fieldsToUpdate.remove("is_custom_app_created");
+            fieldsToUpdate.remove("synced_by");
+            fieldsToUpdate.remove("organization_id");
+            fieldsToUpdate.remove("raw_data");
+            fieldsToUpdate.remove("Account_Name");
+            fieldsToUpdate.remove("_contact_count");
+            fieldsToUpdate.remove("_opportunity_count");
+
+            // 1. Update in Salesforce
+            sfClient.updateRecord(objectName, id, fieldsToUpdate);
+
+            // 2. Update locally with audit
+            updateLocalWithAudit(objectName, id, fieldsToUpdate, userEmail);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "data", Map.of(
+                            "id", id,
+                            "objectName", objectName,
+                            "modifiedBy", userEmail,
+                            "message", objectName + " record updated successfully!"
+                    )
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
+
+    private void updateLocalWithAudit(String objectName, String id, Map<String, Object> data, String userEmail) {
+        String lower = objectName.toLowerCase();
+        String nowStr = LocalDateTime.now().toString();
+
+        if ("account".equals(lower)) {
+            accountRepo.findById(id).ifPresent(acc -> {
+                if (data.containsKey("Name")) acc.setName((String) data.get("Name"));
+                if (data.containsKey("Type")) acc.setType((String) data.get("Type"));
+                if (data.containsKey("Industry")) acc.setIndustry((String) data.get("Industry"));
+                if (data.containsKey("Phone")) acc.setPhone((String) data.get("Phone"));
+                if (data.containsKey("Website")) acc.setWebsite((String) data.get("Website"));
+                if (data.containsKey("BillingCity")) acc.setBillingCity((String) data.get("BillingCity"));
+                if (data.containsKey("AnnualRevenue") && data.get("AnnualRevenue") != null) {
+                    try {
+                        acc.setAnnualRevenue(Double.valueOf(data.get("AnnualRevenue").toString()));
+                    } catch (Exception ignored) {}
+                }
+                acc.setLastModifiedDate(nowStr);
+                acc.markModifiedByCustomApp(userEmail);
+                accountRepo.save(acc);
+            });
+        } else if ("contact".equals(lower)) {
+            contactRepo.findById(id).ifPresent(con -> {
+                String fn = data.containsKey("FirstName") ? (String) data.get("FirstName") : con.getFirstName();
+                String ln = data.containsKey("LastName") ? (String) data.get("LastName") : con.getLastName();
+                if (data.containsKey("FirstName")) con.setFirstName(fn);
+                if (data.containsKey("LastName")) con.setLastName(ln);
+                con.setName((Objects.toString(fn, "") + " " + Objects.toString(ln, "")).trim());
+                if (data.containsKey("Email")) con.setEmail((String) data.get("Email"));
+                if (data.containsKey("Phone")) con.setPhone((String) data.get("Phone"));
+                if (data.containsKey("Title")) con.setTitle((String) data.get("Title"));
+                if (data.containsKey("Department")) con.setDepartment((String) data.get("Department"));
+                if (data.containsKey("AccountId")) {
+                    String accId = (String) data.get("AccountId");
+                    if (accId != null && !accId.isBlank()) {
+                        accountRepo.findById(accId).ifPresent(con::setAccount);
+                    } else {
+                        con.setAccount(null);
+                    }
+                }
+                con.setLastModifiedDate(nowStr);
+                con.markModifiedByCustomApp(userEmail);
+                contactRepo.save(con);
+            });
+        } else if ("opportunity".equals(lower)) {
+            opportunityRepo.findById(id).ifPresent(opp -> {
+                if (data.containsKey("Name")) opp.setName((String) data.get("Name"));
+                if (data.containsKey("StageName")) opp.setStageName((String) data.get("StageName"));
+                if (data.containsKey("Type")) opp.setType((String) data.get("Type"));
+                if (data.containsKey("CloseDate")) opp.setCloseDate((String) data.get("CloseDate"));
+                if (data.containsKey("Amount") && data.get("Amount") != null) {
+                    try {
+                        opp.setAmount(Double.valueOf(data.get("Amount").toString()));
+                    } catch (Exception ignored) {}
+                }
+                if (data.containsKey("Probability") && data.get("Probability") != null) {
+                    try {
+                        opp.setProbability(Double.valueOf(data.get("Probability").toString()));
+                    } catch (Exception ignored) {}
+                }
+                if (data.containsKey("AccountId")) {
+                    String accId = (String) data.get("AccountId");
+                    if (accId != null && !accId.isBlank()) {
+                        accountRepo.findById(accId).ifPresent(opp::setAccount);
+                    } else {
+                        opp.setAccount(null);
+                    }
+                }
+                opp.setLastModifiedDate(nowStr);
+                opp.markModifiedByCustomApp(userEmail);
+                opportunityRepo.save(opp);
+            });
+        } else if ("lead".equals(lower)) {
+            leadRepo.findById(id).ifPresent(lead -> {
+                String fn = data.containsKey("FirstName") ? (String) data.get("FirstName") : lead.getFirstName();
+                String ln = data.containsKey("LastName") ? (String) data.get("LastName") : lead.getLastName();
+                if (data.containsKey("FirstName")) lead.setFirstName(fn);
+                if (data.containsKey("LastName")) lead.setLastName(ln);
+                lead.setName((Objects.toString(fn, "") + " " + Objects.toString(ln, "")).trim());
+                if (data.containsKey("Company")) lead.setCompany((String) data.get("Company"));
+                if (data.containsKey("Email")) lead.setEmail((String) data.get("Email"));
+                if (data.containsKey("Phone")) lead.setPhone((String) data.get("Phone"));
+                if (data.containsKey("Title")) lead.setTitle((String) data.get("Title"));
+                if (data.containsKey("Status")) lead.setStatus((String) data.get("Status"));
+                lead.setLastModifiedDate(nowStr);
+                lead.markModifiedByCustomApp(userEmail);
+                leadRepo.save(lead);
+            });
+        }
     }
 
     private void saveLocalWithAudit(String objectName, String id, Map<String, Object> data, String userEmail) {

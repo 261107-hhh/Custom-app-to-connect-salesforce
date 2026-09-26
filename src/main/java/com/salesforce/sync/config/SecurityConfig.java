@@ -62,8 +62,9 @@ public class SecurityConfig {
                     response.getWriter().write("{\"success\":false,\"error\":\"Unauthorized\"}");
                 }))
                 .authorizeHttpRequests(auth -> auth
-                        // Public user authentication endpoints
+                        // Public user and organization authentication endpoints
                         .requestMatchers("/api/users/login", "/api/users/register").permitAll()
+                        .requestMatchers("/api/orgs/register", "/api/orgs/invitations/accept", "/api/orgs/invitations/info").permitAll()
                         // Public Swagger / OpenAPI UI
                         .requestMatchers(
                                 "/swagger-ui.html",

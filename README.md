@@ -8,32 +8,40 @@ It seamlessly extracts and synchronizes data from **Salesforce** (standard & cus
 
 ## Key Capabilities
 
-1. **Flexible Authentication**:
+1. **Multi-Tenant Organization & User Data Isolation**:
+   - **B2B SaaS Multi-Tenancy**: Designed to support multiple client organizations (Tenants) on a single platform instance with zero cross-tenant data leakage.
+   - **Multi-Org User Membership & Active Switching**: A single user (e.g. `User A`) can belong to multiple organizations (`Org 1` and `Org 2`). When User A connects to `Org 1`, they only see data from `Org 1`; upon switching to `Org 2`, they only see data from `Org 2`.
+   - **Org-Wide Salesforce Connectivity by Higher-ups**: Higher-ups / Organization Admins authenticate their corporate Salesforce org once with OAuth External Client Apps. The entire team can then sync and use data under that organization without each member needing administrative Salesforce credentials.
+   - **Self-Serve Tenant & User Registration**: Automated company registration (`POST /api/orgs/register`), secure email invitations with tokens (`POST /api/orgs/{orgId}/invitations`), and RBAC roles (`OWNER`, `ADMIN`, `MEMBER`, `READONLY`).
+   - **Architecture Reference**: For the complete multi-tenant design blueprint, see [MULTITENANT_APPROACH.md](file:///c:/Users/Himanshu%20Nainwal/Downloads/SF%20Sync/MULTITENANT_APPROACH.md).
+   - **Operational Workflow Guide**: For step-by-step registration, Salesforce OAuth connection, invitations, and login flows, see [WORKFLOW.md](file:///c:/Users/Himanshu%20Nainwal/Downloads/SF%20Sync/WORKFLOW.md).
+
+2. **Flexible Authentication**:
    - **Interactive Mock Sandbox**: Instantly test synchronization, schema changes, and incremental delta updates without live Salesforce credentials.
    - **External Client App (OAuth 2.0 Client Credentials)**: Enterprise-grade OAuth token flow using Client ID and Client Secret.
    - **Direct Password Flow**: Connect with Salesforce Username, Password, and Security Token for Production (`login.salesforce.com`) or Sandbox (`test.salesforce.com`).
    - **OAuth 2.0 Session Token**: Connect using custom Instance URL and active Bearer token.
 
-2. **Dual Synchronization Engines**:
+3. **Dual Synchronization Engines**:
    - **Incremental Sync**: Only pulls records created or modified since the last sync using `SystemModstamp` filtering, minimizing API usage and execution time.
    - **Full Sync**: Re-fetches and upserts entire object tables.
    - **Advanced Query Filters**: Filter by Name, Created Date range, and Modified Date range directly from the dashboard or CLI.
 
-3. **Database & Relational Modeling**:
+4. **Database & Relational Modeling**:
    - **PostgreSQL / H2 JPA Entities**: Strongly-typed JPA entities for `Account`, `Contact`, `Opportunity`, and `Lead` with bidirectional relationships.
    - **Full Fidelity JSON Preservation**: Stores the complete raw Salesforce payload in a `raw_data` column.
    - **User Audit Tracking**: Attributes records created through the Custom App to authenticated users (`custom_app_created_by`), preserved through subsequent syncs.
 
-4. **Interactive Web Dashboard (Port 8080)**:
+5. **Interactive Web Dashboard (Port 8080)**:
    - **Sync Center**: Object selection, incremental/full mode, real-time progress bars, streaming execution logs, and live metrics.
    - **Data Explorer**: Search records with debounced queries, sortable columns, pagination, and relational lookups (Parent Account, Related Contacts, Related Opportunities).
    - **Audit & History**: Track sync logs, record counts, and duration in milliseconds.
    - **Data Export**: Single-click export of any synchronized object to **CSV** or **JSON**.
 
-5. **Headless CLI & Automation**:
+6. **Headless CLI & Automation**:
    - Run automated headless syncs from command line or scheduled tasks via `run-sync.bat` or Maven.
 
-6. **Interactive API Documentation & Tools**:
+7. **Interactive API Documentation & Tools**:
    - **Swagger / OpenAPI 3.0**: [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
    - **H2 Database Console** (Local Profile): [http://localhost:8080/h2-console](http://localhost:8080/h2-console) (JDBC URL: `jdbc:h2:mem:salesforce_sync`)
 
@@ -50,19 +58,20 @@ It seamlessly extracts and synchronizes data from **Salesforce** (standard & cus
 ┌──────────────────────────────▼──────────────────────────────┐
 │             Spring Boot 3 Application Layer                 │
 │  - Security: JWT Filter & Stateless Authentication          │
+│  - Multi-Tenancy: TenantContextFilter & Organization Scope  │
 │  - CORS: Full cross-origin support for external frontends   │
 │  - Controllers: Auth, Sync, Data, Export, Lookups, Mock     │
-│  - Services: SalesforceClient, SalesforceSync, MockSalesforce│
+│  - Services: SalesforceClientProvider, SyncService, MockSF  │
 │  - CLI: SalesforceCliRunner (Headless CLI mode)             │
-│  - Repositories: Spring Data JPA Repositories               │
+│  - Repositories: User- & Tenant-Scoped Spring Data JPA      │
 └──────────────────────────────┬──────────────────────────────┘
-                               │ Hibernate / JDBC
+                               │ Hibernate 6 / JDBC
 ┌──────────────────────────────▼──────────────────────────────┐
 │                     Database Layer                          │
 │  - Local Dev: In-memory H2 (Zero external setup)            │
 │  - Production: PostgreSQL (High performance relational DB)  │
 │  - Tables: sf_account, sf_contact, sf_opportunity, sf_lead  │
-│  - Audit: _sync_history, _sync_state, _sync_config, _users  │
+│  - Multi-Tenant: _organizations, _users, _sync_history      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
