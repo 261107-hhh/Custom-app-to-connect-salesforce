@@ -57,8 +57,8 @@ public class OrganizationService {
                     "Default Organization",
                     "default"
             );
-            defaultOrg.setSfAuthMode("mock");
-            defaultOrg.setSfInstanceUrl("https://mock.salesforce.local");
+            defaultOrg.setSfAuthMode("disconnected");
+            defaultOrg.setSfInstanceUrl(null);
             orgRepo.save(defaultOrg);
 
             // Link existing users to default organization if any
@@ -200,7 +200,7 @@ public class OrganizationService {
 
         if ("mock".equalsIgnoreCase(mode)) {
             org.setSfInstanceUrl("https://mock.salesforce.local");
-            org.setSfUsername("developer@sandbox.mock");
+            org.setSfUsername(null);
         } else if ("eca".equalsIgnoreCase(mode)) {
             org.setSfInstanceUrl((String) credentials.get("instanceUrl"));
             org.setSfClientId((String) credentials.get("clientId"));

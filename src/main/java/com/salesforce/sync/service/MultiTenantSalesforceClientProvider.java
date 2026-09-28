@@ -59,8 +59,18 @@ public class MultiTenantSalesforceClientProvider {
             OrganizationEntity org = orgOpt.get();
             String mode = org.getSfAuthMode();
 
-            if ("mock".equalsIgnoreCase(mode) || mode == null) {
-                return defaultClient;
+            if (mode == null || "disconnected".equalsIgnoreCase(mode)) {
+                SalesforceClientService client = new SalesforceClientService(objectMapper, null, mockSalesforceService);
+                client.disconnect();
+                return client;
+            }
+
+            if ("mock".equalsIgnoreCase(mode)) {
+                SalesforceClientService client = new SalesforceClientService(objectMapper, null, mockSalesforceService);
+                try {
+                    client.connect(Map.of("mode", "mock"));
+                } catch (Exception ignored) {}
+                return client;
             }
 
             log.info("Creating dedicated SalesforceClientService for organization {}", id);

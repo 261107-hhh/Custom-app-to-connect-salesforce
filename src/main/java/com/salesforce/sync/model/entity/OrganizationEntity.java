@@ -28,7 +28,7 @@ public class OrganizationEntity {
     private String sfInstanceUrl;
 
     @Column(name = "sf_auth_mode", length = 30)
-    private String sfAuthMode = "mock"; // "eca", "password", "session", "mock"
+    private String sfAuthMode = "disconnected"; // "disconnected", "eca", "password", "session", "mock"
 
     @Column(name = "sf_client_id", length = 255)
     private String sfClientId;
@@ -58,7 +58,7 @@ public class OrganizationEntity {
         this.name = name;
         this.slug = slug;
         this.status = "ACTIVE";
-        this.sfAuthMode = "mock";
+        this.sfAuthMode = "disconnected";
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
     }
@@ -103,6 +103,9 @@ public class OrganizationEntity {
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
     public boolean isSalesforceConfigured() {
-        return (sfInstanceUrl != null && !sfInstanceUrl.isBlank()) || "mock".equalsIgnoreCase(sfAuthMode);
+        if (sfAuthMode == null || "disconnected".equalsIgnoreCase(sfAuthMode)) {
+            return false;
+        }
+        return "mock".equalsIgnoreCase(sfAuthMode) || (sfInstanceUrl != null && !sfInstanceUrl.isBlank());
     }
 }

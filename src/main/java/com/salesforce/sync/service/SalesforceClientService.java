@@ -49,34 +49,38 @@ public class SalesforceClientService {
     @jakarta.annotation.PostConstruct
     public void init() {
         try {
-            Optional<SyncConfigEntity> cfg = configRepository.findById("sf_connection");
-            if (cfg.isPresent()) {
-                JsonNode node = objectMapper.readTree(cfg.get().getValue());
-                this.mode = node.path("mode").asText("mock");
-                this.username = node.path("username").asText("developer@sandbox.mock");
-                this.instanceUrl = node.path("instanceUrl").asText("https://mock.salesforce.local");
-                this.connected = true;
-                this.isMock = "mock".equalsIgnoreCase(this.mode);
-                if (this.isMock) {
-                    this.accessToken = "mock-token-xyz";
+            if (configRepository != null) {
+                Optional<SyncConfigEntity> cfg = configRepository.findById("sf_connection");
+                if (cfg.isPresent()) {
+                    JsonNode node = objectMapper.readTree(cfg.get().getValue());
+                    this.mode = node.path("mode").asText("disconnected");
+                    if (!"disconnected".equalsIgnoreCase(this.mode)) {
+                        this.username = node.path("username").asText(null);
+                        this.instanceUrl = node.path("instanceUrl").asText(null);
+                        this.connected = true;
+                        this.isMock = "mock".equalsIgnoreCase(this.mode);
+                        if (this.isMock) {
+                            this.accessToken = "mock-token-xyz";
+                        }
+                        return;
+                    }
                 }
-            } else {
-                // Default to mock mode out-of-the-box
-                this.isMock = true;
-                this.connected = true;
-                this.mode = "mock";
-                this.username = "developer@sandbox.mock";
-                this.instanceUrl = "https://mock.salesforce.local";
-                this.accessToken = "mock-token-xyz";
             }
+            // Default to disconnected out-of-the-box
+            this.isMock = false;
+            this.connected = false;
+            this.mode = "disconnected";
+            this.username = null;
+            this.instanceUrl = null;
+            this.accessToken = null;
         } catch (Exception e) {
             log.warn("Could not initialize Salesforce connection: {}", e.getMessage());
-            this.isMock = true;
-            this.connected = true;
-            this.mode = "mock";
-            this.username = "developer@sandbox.mock";
-            this.instanceUrl = "https://mock.salesforce.local";
-            this.accessToken = "mock-token-xyz";
+            this.isMock = false;
+            this.connected = false;
+            this.mode = "disconnected";
+            this.username = null;
+            this.instanceUrl = null;
+            this.accessToken = null;
         }
     }
 
@@ -87,7 +91,7 @@ public class SalesforceClientService {
             this.isMock = true;
             this.connected = true;
             this.mode = "mock";
-            this.username = "developer@sandbox.mock";
+            this.username = null;
             this.instanceUrl = "https://mock.salesforce.local";
             this.accessToken = "mock-token-xyz";
 
@@ -212,7 +216,12 @@ public class SalesforceClientService {
         this.connected = false;
         this.accessToken = null;
         this.isMock = false;
-        configRepository.deleteById("sf_connection");
+        this.mode = "disconnected";
+        this.username = null;
+        this.instanceUrl = null;
+        if (configRepository != null) {
+            configRepository.deleteById("sf_connection");
+        }
     }
 
     public Map<String, Object> getStatus() {
@@ -417,7 +426,7 @@ public class SalesforceClientService {
         }
     }
 
-    public boolean isConnected() { return connected; }
+    public boolean isConnected() { return connected && (isMock || (accessToken != null && !accessToken.isBlank())); }
     public boolean isMock() { return isMock; }
     public String getInstanceUrl() { return instanceUrl; }
 }

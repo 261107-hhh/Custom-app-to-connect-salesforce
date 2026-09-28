@@ -27,6 +27,7 @@ public class SalesforceSyncService {
     private final SyncHistoryRepository historyRepo;
     private final SyncStateRepository stateRepo;
     private final ObjectMapper objectMapper;
+    private final SalesforceSchemaRegistry schemaRegistry;
 
     private final Map<String, Object> currentJob = Collections.synchronizedMap(new HashMap<>());
 
@@ -38,6 +39,19 @@ public class SalesforceSyncService {
                                  SyncHistoryRepository historyRepo,
                                  SyncStateRepository stateRepo,
                                  ObjectMapper objectMapper) {
+        this(sfClient, accountRepo, contactRepo, opportunityRepo, leadRepo, historyRepo, stateRepo, objectMapper, new SalesforceSchemaRegistry());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SalesforceSyncService(SalesforceClientService sfClient,
+                                 AccountRepository accountRepo,
+                                 ContactRepository contactRepo,
+                                 OpportunityRepository opportunityRepo,
+                                 LeadRepository leadRepo,
+                                 SyncHistoryRepository historyRepo,
+                                 SyncStateRepository stateRepo,
+                                 ObjectMapper objectMapper,
+                                 SalesforceSchemaRegistry schemaRegistry) {
         this.sfClient = sfClient;
         this.accountRepo = accountRepo;
         this.contactRepo = contactRepo;
@@ -46,6 +60,7 @@ public class SalesforceSyncService {
         this.historyRepo = historyRepo;
         this.stateRepo = stateRepo;
         this.objectMapper = objectMapper;
+        this.schemaRegistry = schemaRegistry != null ? schemaRegistry : new SalesforceSchemaRegistry();
         resetCurrentJob();
     }
 
@@ -74,79 +89,102 @@ public class SalesforceSyncService {
         currentJob.put("error", null);
         currentJob.put("logs", new java.util.concurrent.CopyOnWriteArrayList<Map<String, String>>());
 
-        executeAsyncSync(objects, mode, filters != null ? filters : Map.of(), effectiveUser);
+        appendLog("Sync process started for objects: " + String.join(", ", objects) + " [User: " + effectiveUser + "]", "info");
 
-        return Map.of("jobId", jobId, "status", "started", "objects", objects, "mode", mode, "userEmail", effectiveUser);
+        executeSyncAsync(objects, mode, filters, effectiveUser);
+
+        return new HashMap<>(currentJob);
+    }
+
+    public Map<String, Object> getStatus() {
+        return new HashMap<>(currentJob);
+    }
+
+    private void resetCurrentJob() {
+        currentJob.put("id", null);
+        currentJob.put("status", "idle");
+        currentJob.put("progressPercent", 0);
+        currentJob.put("currentObject", null);
+        currentJob.put("objects", List.of());
+        currentJob.put("mode", null);
+        currentJob.put("totalRecordsSynced", 0);
+        currentJob.put("details", new ConcurrentHashMap<String, Object>());
+        currentJob.put("startedAt", null);
+        currentJob.put("finishedAt", null);
+        currentJob.put("error", null);
+        currentJob.put("logs", new java.util.concurrent.CopyOnWriteArrayList<Map<String, String>>());
     }
 
     @Async
-    public void executeAsyncSync(List<String> objects, String mode, Map<String, Object> filters) {
-        executeAsyncSync(objects, mode, filters, "cli@app.local");
-    }
-
-    @Async
-    public void executeAsyncSync(List<String> objects, String mode, Map<String, Object> filters, String userEmail) {
+    public void executeSyncAsync(List<String> objects, String mode, Map<String, Object> filters, String userEmail) {
         int totalObjects = objects.size();
         int completed = 0;
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> details = (Map<String, Object>) currentJob.get("details");
-        if (details == null) {
-            details = new ConcurrentHashMap<>();
-            currentJob.put("details", details);
-        }
 
         try {
             for (String objectName : objects) {
                 currentJob.put("currentObject", objectName);
-                currentJob.put("progressPercent", (int) Math.round(((double) completed / totalObjects) * 100));
-                appendLog("Starting sync for object \"" + objectName + "\" on behalf of user " + userEmail + "...", "info");
+                appendLog("Starting sync for object: " + objectName, "info");
 
-                SyncHistoryEntity history = new SyncHistoryEntity();
-                history.setObjectName(objectName);
-                history.setSyncMode(mode);
-                history.setStatus("RUNNING");
-                history.setUserEmail(userEmail);
-                history.setStartTime(LocalDateTime.now());
-                history = historyRepo.save(history);
+                LocalDateTime startObjTime = LocalDateTime.now();
+                int recordsSynced = 0;
+                String status = "SUCCESS";
+                String errMsg = null;
 
-                long startTime = System.currentTimeMillis();
                 try {
-                    int count = syncSingleObject(objectName, mode, filters, userEmail);
-                    long duration = System.currentTimeMillis() - startTime;
+                    recordsSynced = syncSingleObject(objectName, mode, filters, userEmail);
+                    appendLog("Successfully synced " + recordsSynced + " records for object: " + objectName, "success");
 
-                    history.setStatus("SUCCESS");
-                    history.setRecordsFetched(count);
-                    history.setRecordsUpserted(count);
-                    history.setEndTime(LocalDateTime.now());
-                    history.setDurationMs(duration);
-                    historyRepo.save(history);
-
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> details = (Map<String, Object>) currentJob.get("details");
                     details.put(objectName, Map.of(
-                            "status", "success",
-                            "fetched", count,
-                            "upserted", count,
-                            "durationMs", duration
+                            "recordsSynced", recordsSynced,
+                            "status", "SUCCESS",
+                            "finishedAt", LocalDateTime.now().toString()
                     ));
 
-                    int total = (int) currentJob.getOrDefault("totalRecordsSynced", 0) + count;
+                    int total = (int) currentJob.getOrDefault("totalRecordsSynced", 0) + recordsSynced;
                     currentJob.put("totalRecordsSynced", total);
-                    appendLog("Completed \"" + objectName + "\": " + count + " upserted in " + duration + "ms", "success");
-                } catch (Exception e) {
-                    long duration = System.currentTimeMillis() - startTime;
-                    history.setStatus("ERROR");
-                    history.setErrorMessage(e.getMessage());
-                    history.setEndTime(LocalDateTime.now());
-                    history.setDurationMs(duration);
+
+                    SyncHistoryEntity history = new SyncHistoryEntity();
+                    history.setObjectName(objectName);
+                    history.setSyncMode(mode);
+                    history.setRecordsFetched(recordsSynced);
+                    history.setRecordsUpserted(recordsSynced);
+                    history.setStatus(status);
+                    history.setStartTime(startObjTime);
+                    LocalDateTime finishTime = LocalDateTime.now();
+                    history.setEndTime(finishTime);
+                    history.setDurationMs(java.time.Duration.between(startObjTime, finishTime).toMillis());
+                    history.setUserEmail(userEmail);
                     historyRepo.save(history);
 
+                } catch (Exception e) {
+                    status = "FAILED";
+                    errMsg = e.getMessage();
+                    log.error("Failed to sync object " + objectName, e);
+
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> details = (Map<String, Object>) currentJob.get("details");
                     details.put(objectName, Map.of(
-                            "status", "error",
-                            "fetched", 0,
-                            "upserted", 0,
-                            "durationMs", duration,
-                            "error", e.getMessage() != null ? e.getMessage() : "Sync failed"
+                            "recordsSynced", 0,
+                            "status", "FAILED",
+                            "error", e.getMessage() != null ? e.getMessage() : "Unknown error",
+                            "finishedAt", LocalDateTime.now().toString()
                     ));
+
+                    SyncHistoryEntity history = new SyncHistoryEntity();
+                    history.setObjectName(objectName);
+                    history.setSyncMode(mode);
+                    history.setRecordsFetched(0);
+                    history.setRecordsUpserted(0);
+                    history.setStatus(status);
+                    history.setErrorMessage(errMsg);
+                    history.setStartTime(startObjTime);
+                    LocalDateTime finishTime = LocalDateTime.now();
+                    history.setEndTime(finishTime);
+                    history.setDurationMs(java.time.Duration.between(startObjTime, finishTime).toMillis());
+                    history.setUserEmail(userEmail);
+                    historyRepo.save(history);
 
                     appendLog("Error syncing \"" + objectName + "\": " + e.getMessage(), "error");
                 }
@@ -182,18 +220,21 @@ public class SalesforceSyncService {
             }
         }
 
-        StringBuilder soql = new StringBuilder("SELECT Id, Name, SystemModstamp, LastModifiedDate, CreatedDate");
-
-        if ("Account".equalsIgnoreCase(objectName)) {
-            soql.append(", Type, Industry, AnnualRevenue, Phone, Website, BillingCity");
-        } else if ("Contact".equalsIgnoreCase(objectName)) {
-            soql.append(", AccountId, FirstName, LastName, Email, Phone, Title, Department");
-        } else if ("Opportunity".equalsIgnoreCase(objectName)) {
-            soql.append(", AccountId, StageName, Amount, CloseDate, Probability, Type");
-        } else if ("Lead".equalsIgnoreCase(objectName)) {
-            soql.append(", FirstName, LastName, Company, Email, Phone, Title, Status");
+        // Introspect object describe to dynamically query ALL fields from Salesforce
+        JsonNode describeNode = null;
+        try {
+            describeNode = sfClient.describeObject(objectName);
+        } catch (Exception e) {
+            log.warn("[SyncService] Could not describe {}: {}", objectName, e.getMessage());
         }
 
+        List<String> queryFields = schemaRegistry.extractQueryableFields(objectName, describeNode);
+        if (queryFields.isEmpty()) {
+            queryFields = List.of("Id", "Name", "SystemModstamp", "LastModifiedDate", "CreatedDate");
+        }
+
+        StringBuilder soql = new StringBuilder("SELECT ");
+        soql.append(String.join(", ", queryFields));
         soql.append(" FROM ").append(objectName);
 
         List<String> whereClauses = new ArrayList<>();
@@ -257,7 +298,7 @@ public class SalesforceSyncService {
                 String sysMod = r.path("SystemModstamp").asText(null);
                 if (sysMod != null) latestStamp = sysMod;
 
-                upsertEntity(objectName, id, r, effectiveUser);
+                upsertEntity(objectName, id, r, effectiveUser, describeNode);
                 count++;
             }
         }
@@ -277,23 +318,34 @@ public class SalesforceSyncService {
         return count;
     }
 
-    private void upsertEntity(String objectName, String id, JsonNode r, String userEmail) {
-        String rawData = r.toString();
+    private void upsertEntity(String objectName, String id, JsonNode r, String userEmail, JsonNode describeNode) {
+        Map<String, Object> rawMap = objectMapper.convertValue(r, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        Map<String, Object> normalized = schemaRegistry.normalizeRecord(objectName, rawMap, describeNode);
+        String rawData;
+        try {
+            rawData = objectMapper.writeValueAsString(normalized);
+        } catch (Exception e) {
+            rawData = r.toString();
+        }
         String syncedAt = LocalDateTime.now().toString();
 
         if ("Account".equalsIgnoreCase(objectName)) {
             AccountEntity acc = accountRepo.findById(id).orElse(new AccountEntity());
             acc.setId(id);
-            acc.setName(r.path("Name").asText(null));
-            acc.setType(r.path("Type").asText(null));
-            acc.setIndustry(r.path("Industry").asText(null));
-            if (r.hasNonNull("AnnualRevenue")) acc.setAnnualRevenue(r.path("AnnualRevenue").asDouble());
-            acc.setPhone(r.path("Phone").asText(null));
-            acc.setWebsite(r.path("Website").asText(null));
-            acc.setBillingCity(r.path("BillingCity").asText(null));
-            acc.setCreatedDate(r.path("CreatedDate").asText(null));
-            acc.setLastModifiedDate(r.path("LastModifiedDate").asText(null));
-            acc.setSystemModstamp(r.path("SystemModstamp").asText(null));
+            acc.setName(getStringValue(normalized, "Name"));
+            acc.setType(getStringValue(normalized, "Type"));
+            acc.setIndustry(getStringValue(normalized, "Industry"));
+            if (normalized.get("AnnualRevenue") != null && !normalized.get("AnnualRevenue").toString().isBlank()) {
+                try {
+                    acc.setAnnualRevenue(Double.valueOf(normalized.get("AnnualRevenue").toString()));
+                } catch (Exception ignored) {}
+            }
+            acc.setPhone(getStringValue(normalized, "Phone"));
+            acc.setWebsite(getStringValue(normalized, "Website"));
+            acc.setBillingCity(getStringValue(normalized, "BillingCity"));
+            acc.setCreatedDate(getStringValue(normalized, "CreatedDate"));
+            acc.setLastModifiedDate(getStringValue(normalized, "LastModifiedDate"));
+            acc.setSystemModstamp(getStringValue(normalized, "SystemModstamp"));
             acc.setRawData(rawData);
             acc.setSyncedAt(syncedAt);
             // CRITICAL: Attribute sync to authenticated user while preserving local custom app creation
@@ -302,68 +354,79 @@ public class SalesforceSyncService {
         } else if ("Contact".equalsIgnoreCase(objectName)) {
             ContactEntity con = contactRepo.findById(id).orElse(new ContactEntity());
             con.setId(id);
-            con.setName(r.path("Name").asText(null));
-            con.setFirstName(r.path("FirstName").asText(null));
-            con.setLastName(r.path("LastName").asText(null));
-            con.setEmail(r.path("Email").asText(null));
-            con.setPhone(r.path("Phone").asText(null));
-            con.setTitle(r.path("Title").asText(null));
-            con.setDepartment(r.path("Department").asText(null));
-            con.setCreatedDate(r.path("CreatedDate").asText(null));
-            con.setLastModifiedDate(r.path("LastModifiedDate").asText(null));
-            con.setSystemModstamp(r.path("SystemModstamp").asText(null));
+            con.setName(getStringValue(normalized, "Name"));
+            con.setFirstName(getStringValue(normalized, "FirstName"));
+            con.setLastName(getStringValue(normalized, "LastName"));
+            con.setEmail(getStringValue(normalized, "Email"));
+            con.setPhone(getStringValue(normalized, "Phone"));
+            con.setTitle(getStringValue(normalized, "Title"));
+            con.setDepartment(getStringValue(normalized, "Department"));
+            con.setCreatedDate(getStringValue(normalized, "CreatedDate"));
+            con.setLastModifiedDate(getStringValue(normalized, "LastModifiedDate"));
+            con.setSystemModstamp(getStringValue(normalized, "SystemModstamp"));
             con.setRawData(rawData);
             con.setSyncedAt(syncedAt);
 
-            String accId = r.path("AccountId").asText(null);
+            String accId = getStringValue(normalized, "AccountId");
             if (accId != null && !accId.isBlank()) {
                 accountRepo.findById(accId).ifPresent(con::setAccount);
             }
-            // CRITICAL: Attribute sync to authenticated user while preserving local custom app creation
             con.addSyncedBy(userEmail);
             contactRepo.save(con);
         } else if ("Opportunity".equalsIgnoreCase(objectName)) {
             OpportunityEntity opp = opportunityRepo.findById(id).orElse(new OpportunityEntity());
             opp.setId(id);
-            opp.setName(r.path("Name").asText(null));
-            opp.setStageName(r.path("StageName").asText(null));
-            if (r.hasNonNull("Amount")) opp.setAmount(r.path("Amount").asDouble());
-            opp.setCloseDate(r.path("CloseDate").asText(null));
-            if (r.hasNonNull("Probability")) opp.setProbability(r.path("Probability").asDouble());
-            opp.setType(r.path("Type").asText(null));
-            opp.setCreatedDate(r.path("CreatedDate").asText(null));
-            opp.setLastModifiedDate(r.path("LastModifiedDate").asText(null));
-            opp.setSystemModstamp(r.path("SystemModstamp").asText(null));
+            opp.setName(getStringValue(normalized, "Name"));
+            opp.setStageName(getStringValue(normalized, "StageName"));
+            if (normalized.get("Amount") != null && !normalized.get("Amount").toString().isBlank()) {
+                try {
+                    opp.setAmount(Double.valueOf(normalized.get("Amount").toString()));
+                } catch (Exception ignored) {}
+            }
+            opp.setCloseDate(getStringValue(normalized, "CloseDate"));
+            if (normalized.get("Probability") != null && !normalized.get("Probability").toString().isBlank()) {
+                try {
+                    opp.setProbability(Double.valueOf(normalized.get("Probability").toString()));
+                } catch (Exception ignored) {}
+            }
+            opp.setType(getStringValue(normalized, "Type"));
+            opp.setCreatedDate(getStringValue(normalized, "CreatedDate"));
+            opp.setLastModifiedDate(getStringValue(normalized, "LastModifiedDate"));
+            opp.setSystemModstamp(getStringValue(normalized, "SystemModstamp"));
             opp.setRawData(rawData);
             opp.setSyncedAt(syncedAt);
 
-            String accId = r.path("AccountId").asText(null);
+            String accId = getStringValue(normalized, "AccountId");
             if (accId != null && !accId.isBlank()) {
                 accountRepo.findById(accId).ifPresent(opp::setAccount);
             }
-            // CRITICAL: Attribute sync to authenticated user while preserving local custom app creation
             opp.addSyncedBy(userEmail);
             opportunityRepo.save(opp);
         } else if ("Lead".equalsIgnoreCase(objectName)) {
             LeadEntity lead = leadRepo.findById(id).orElse(new LeadEntity());
             lead.setId(id);
-            lead.setName(r.path("Name").asText(null));
-            lead.setFirstName(r.path("FirstName").asText(null));
-            lead.setLastName(r.path("LastName").asText(null));
-            lead.setCompany(r.path("Company").asText(null));
-            lead.setEmail(r.path("Email").asText(null));
-            lead.setPhone(r.path("Phone").asText(null));
-            lead.setTitle(r.path("Title").asText(null));
-            lead.setStatus(r.path("Status").asText(null));
-            lead.setCreatedDate(r.path("CreatedDate").asText(null));
-            lead.setLastModifiedDate(r.path("LastModifiedDate").asText(null));
-            lead.setSystemModstamp(r.path("SystemModstamp").asText(null));
+            lead.setName(getStringValue(normalized, "Name"));
+            lead.setFirstName(getStringValue(normalized, "FirstName"));
+            lead.setLastName(getStringValue(normalized, "LastName"));
+            lead.setCompany(getStringValue(normalized, "Company"));
+            lead.setEmail(getStringValue(normalized, "Email"));
+            lead.setPhone(getStringValue(normalized, "Phone"));
+            lead.setTitle(getStringValue(normalized, "Title"));
+            lead.setStatus(getStringValue(normalized, "Status"));
+            lead.setCreatedDate(getStringValue(normalized, "CreatedDate"));
+            lead.setLastModifiedDate(getStringValue(normalized, "LastModifiedDate"));
+            lead.setSystemModstamp(getStringValue(normalized, "SystemModstamp"));
             lead.setRawData(rawData);
             lead.setSyncedAt(syncedAt);
-            // CRITICAL: Attribute sync to authenticated user while preserving local custom app creation
             lead.addSyncedBy(userEmail);
             leadRepo.save(lead);
         }
+    }
+
+    private String getStringValue(Map<String, Object> map, String key) {
+        if (map == null || !map.containsKey(key)) return null;
+        Object val = map.get(key);
+        return val != null ? String.valueOf(val) : null;
     }
 
     public long getObjectCountByUser(String objectName, String userEmail) {
@@ -400,20 +463,5 @@ public class SalesforceSyncService {
                 logs.remove(0);
             }
         }
-        log.info("[SyncService] [{}] {}", type.toUpperCase(), message);
-    }
-
-    public Map<String, Object> getStatus() {
-        return new HashMap<>(currentJob);
-    }
-
-    private void resetCurrentJob() {
-        currentJob.put("id", "");
-        currentJob.put("status", "idle");
-        currentJob.put("progressPercent", 0);
-        currentJob.put("currentObject", "");
-        currentJob.put("totalRecordsSynced", 0);
-        currentJob.put("details", new ConcurrentHashMap<String, Object>());
-        currentJob.put("logs", new java.util.concurrent.CopyOnWriteArrayList<Map<String, String>>());
     }
 }
