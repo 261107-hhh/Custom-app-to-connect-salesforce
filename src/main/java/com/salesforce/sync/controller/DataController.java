@@ -16,6 +16,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import com.salesforce.sync.multitenancy.OrganizationContext;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -38,6 +40,7 @@ public class DataController {
     private final SalesforceClientService sfClient;
     private final ObjectMapper objectMapper;
     private final SalesforceSchemaRegistry schemaRegistry;
+    private final OrganizationMemberRepository memberRepo;
 
     public DataController(AccountRepository accountRepo,
                           ContactRepository contactRepo,
@@ -45,7 +48,17 @@ public class DataController {
                           LeadRepository leadRepo,
                           SalesforceClientService sfClient,
                           ObjectMapper objectMapper) {
-        this(accountRepo, contactRepo, opportunityRepo, leadRepo, sfClient, objectMapper, new SalesforceSchemaRegistry());
+        this(accountRepo, contactRepo, opportunityRepo, leadRepo, sfClient, objectMapper, new SalesforceSchemaRegistry(), null);
+    }
+
+    public DataController(AccountRepository accountRepo,
+                          ContactRepository contactRepo,
+                          OpportunityRepository opportunityRepo,
+                          LeadRepository leadRepo,
+                          SalesforceClientService sfClient,
+                          ObjectMapper objectMapper,
+                          SalesforceSchemaRegistry schemaRegistry) {
+        this(accountRepo, contactRepo, opportunityRepo, leadRepo, sfClient, objectMapper, schemaRegistry, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -55,7 +68,8 @@ public class DataController {
                           LeadRepository leadRepo,
                           SalesforceClientService sfClient,
                           ObjectMapper objectMapper,
-                          SalesforceSchemaRegistry schemaRegistry) {
+                          SalesforceSchemaRegistry schemaRegistry,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) OrganizationMemberRepository memberRepo) {
         this.accountRepo = accountRepo;
         this.contactRepo = contactRepo;
         this.opportunityRepo = opportunityRepo;
@@ -63,6 +77,7 @@ public class DataController {
         this.sfClient = sfClient;
         this.objectMapper = objectMapper;
         this.schemaRegistry = schemaRegistry != null ? schemaRegistry : new SalesforceSchemaRegistry();
+        this.memberRepo = memberRepo;
     }
 
     @GetMapping("/tables")
@@ -208,6 +223,13 @@ public class DataController {
             @RequestBody Map<String, Object> recordData,
             Authentication authentication) {
         try {
+            if (isReadOnlyUser(authentication)) {
+                return ResponseEntity.status(403).body(Map.of(
+                        "success", false,
+                        "error", "Permission Denied: Users with READONLY role cannot create records."
+                ));
+            }
+
             if (recordData == null || recordData.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("success", false, "error", "No field data provided."));
             }
@@ -321,6 +343,13 @@ public class DataController {
             @RequestBody Map<String, Object> recordData,
             Authentication authentication) {
         try {
+            if (isReadOnlyUser(authentication)) {
+                return ResponseEntity.status(403).body(Map.of(
+                        "success", false,
+                        "error", "Permission Denied: Users with READONLY role cannot edit records."
+                ));
+            }
+
             if (recordData == null || recordData.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("success", false, "error", "No field data provided for update."));
             }
@@ -772,5 +801,30 @@ public class DataController {
         map.put("isCustomAppCreated", b.getIsCustomAppCreated());
         map.put("synced_by", b.getSyncedBy());
         map.put("syncedBy", b.getSyncedBy());
+    }
+
+    private boolean isReadOnlyUser(Authentication authentication) {
+        if (authentication == null) return false;
+
+        if (authentication.getAuthorities() != null) {
+            for (GrantedAuthority ga : authentication.getAuthorities()) {
+                String auth = ga.getAuthority();
+                if ("ROLE_READONLY".equalsIgnoreCase(auth) || "ROLE_READ_ONLY".equalsIgnoreCase(auth)) {
+                    return true;
+                }
+            }
+        }
+
+        if (memberRepo != null && authentication.getPrincipal() instanceof UserEntity user) {
+            String activeOrgId = OrganizationContext.getCurrentOrganization();
+            if (activeOrgId != null && !activeOrgId.isBlank()) {
+                Optional<OrganizationMemberEntity> memOpt = memberRepo.findByUserIdAndOrganizationId(user.getId(), activeOrgId);
+                if (memOpt.isPresent()) {
+                    String role = memOpt.get().getRole();
+                    return "READONLY".equalsIgnoreCase(role) || "READ_ONLY".equalsIgnoreCase(role);
+                }
+            }
+        }
+        return false;
     }
 }

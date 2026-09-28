@@ -32,12 +32,12 @@ public class OrganizationService {
     private final EncryptionService encryptionService;
 
     public OrganizationService(OrganizationRepository orgRepo,
-                               OrganizationMemberRepository memberRepo,
-                               OrganizationInvitationRepository invitationRepo,
-                               UserRepository userRepo,
-                               PasswordEncoder passwordEncoder,
-                               JwtService jwtService,
-                               EncryptionService encryptionService) {
+            OrganizationMemberRepository memberRepo,
+            OrganizationInvitationRepository invitationRepo,
+            UserRepository userRepo,
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService,
+            EncryptionService encryptionService) {
         this.orgRepo = orgRepo;
         this.memberRepo = memberRepo;
         this.invitationRepo = invitationRepo;
@@ -55,8 +55,7 @@ public class OrganizationService {
             OrganizationEntity defaultOrg = new OrganizationEntity(
                     OrganizationContext.DEFAULT_ORGANIZATION_ID,
                     "Default Organization",
-                    "default"
-            );
+                    "default");
             defaultOrg.setSfAuthMode("disconnected");
             defaultOrg.setSfInstanceUrl(null);
             orgRepo.save(defaultOrg);
@@ -107,13 +106,18 @@ public class OrganizationService {
         OrganizationMemberEntity member = new OrganizationMemberEntity(user, org, "OWNER");
         memberRepo.save(member);
 
+        user.setDefaultOrganizationId(org.getId());
+        user = userRepo.save(user);
+
         String token = jwtService.generateToken(user.getEmail(), user.getName(), org.getId(), "OWNER");
         OrganizationContext.setCurrentOrganization(org.getId());
 
-        AuthResponse resp = AuthResponse.success(token, user.getEmail(), user.getName(), "Organization registered successfully!");
+        AuthResponse resp = AuthResponse.success(token, user.getEmail(), user.getName(),
+                "Organization registered successfully!");
         resp.setActiveOrgId(org.getId());
         resp.setActiveOrgName(org.getName());
         resp.setActiveOrgRole("OWNER");
+        resp.setDefaultOrgId(org.getId());
         resp.setOrganizations(getUserOrganizations(user));
         return resp;
     }
@@ -139,14 +143,21 @@ public class OrganizationService {
         OrganizationMemberEntity member = new OrganizationMemberEntity(currentUser, org, "OWNER");
         memberRepo.save(member);
 
+        if (currentUser.getDefaultOrganizationId() == null || currentUser.getDefaultOrganizationId().isBlank()) {
+            currentUser.setDefaultOrganizationId(org.getId());
+            userRepo.save(currentUser);
+        }
+
         return mapToDetailDto(org, "OWNER");
     }
 
     @Transactional(readOnly = true)
     public List<OrgSummaryDto> getUserOrganizations(UserEntity currentUser) {
         List<OrganizationMemberEntity> members = memberRepo.findByUserId(currentUser.getId());
+        String defaultOrgId = currentUser.getDefaultOrganizationId();
         return members.stream().map(m -> {
             OrganizationEntity org = m.getOrganization();
+            boolean isDefault = defaultOrgId != null && defaultOrgId.equals(org.getId());
             return new OrgSummaryDto(
                     org.getId(),
                     org.getName(),
@@ -155,32 +166,59 @@ public class OrganizationService {
                     org.getStatus(),
                     org.isSalesforceConfigured(),
                     org.getSfAuthMode(),
-                    org.getSfInstanceUrl()
-            );
+                    org.getSfInstanceUrl(),
+                    isDefault);
         }).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public AuthResponse switchOrganization(UserEntity currentUser, String targetOrgId) {
         OrganizationMemberEntity member = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), targetOrgId)
-                .orElseThrow(() -> new IllegalArgumentException("You are not a member of organization: " + targetOrgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("You are not a member of organization: " + targetOrgId));
 
         OrganizationEntity org = member.getOrganization();
-        String token = jwtService.generateToken(currentUser.getEmail(), currentUser.getName(), org.getId(), member.getRole());
+        String token = jwtService.generateToken(currentUser.getEmail(), currentUser.getName(), org.getId(),
+                member.getRole());
         OrganizationContext.setCurrentOrganization(org.getId());
 
-        AuthResponse resp = AuthResponse.success(token, currentUser.getEmail(), currentUser.getName(), "Switched to " + org.getName());
+        AuthResponse resp = AuthResponse.success(token, currentUser.getEmail(), currentUser.getName(),
+                "Switched to " + org.getName());
         resp.setActiveOrgId(org.getId());
         resp.setActiveOrgName(org.getName());
         resp.setActiveOrgRole(member.getRole());
+        resp.setDefaultOrgId(currentUser.getDefaultOrganizationId());
         resp.setOrganizations(getUserOrganizations(currentUser));
         return resp;
+    }
+
+    @Transactional
+    public OrgSummaryDto setDefaultOrganization(UserEntity currentUser, String targetOrgId) {
+        OrganizationMemberEntity member = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), targetOrgId)
+                .orElseThrow(
+                        () -> new IllegalArgumentException("You are not a member of organization: " + targetOrgId));
+
+        currentUser.setDefaultOrganizationId(targetOrgId);
+        userRepo.save(currentUser);
+
+        OrganizationEntity org = member.getOrganization();
+        return new OrgSummaryDto(
+                org.getId(),
+                org.getName(),
+                org.getSlug(),
+                member.getRole(),
+                org.getStatus(),
+                org.isSalesforceConfigured(),
+                org.getSfAuthMode(),
+                org.getSfInstanceUrl(),
+                true);
     }
 
     @Transactional(readOnly = true)
     public OrgDetailDto getOrganization(String orgId, UserEntity currentUser) {
         OrganizationMemberEntity member = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), orgId)
-                .orElseThrow(() -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
 
         return mapToDetailDto(member.getOrganization(), member.getRole());
     }
@@ -188,7 +226,8 @@ public class OrganizationService {
     @Transactional
     public OrgDetailDto connectSalesforce(String orgId, Map<String, Object> credentials, UserEntity currentUser) {
         OrganizationMemberEntity member = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), orgId)
-                .orElseThrow(() -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
 
         if (!member.isAdminOrOwner()) {
             throw new IllegalArgumentException("Only Admins and Owners can configure Salesforce integration.");
@@ -226,7 +265,8 @@ public class OrganizationService {
     @Transactional
     public OrgDetailDto disconnectSalesforce(String orgId, UserEntity currentUser) {
         OrganizationMemberEntity member = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), orgId)
-                .orElseThrow(() -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
 
         if (!member.isAdminOrOwner()) {
             throw new IllegalArgumentException("Only Admins and Owners can disconnect Salesforce integration.");
@@ -249,7 +289,8 @@ public class OrganizationService {
     @Transactional(readOnly = true)
     public List<MemberDto> getMembers(String orgId, UserEntity currentUser) {
         memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), orgId)
-                .orElseThrow(() -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
 
         List<OrganizationMemberEntity> members = memberRepo.findByOrganizationId(orgId);
         return members.stream().map(m -> new MemberDto(
@@ -259,14 +300,14 @@ public class OrganizationService {
                 m.getUser().getName(),
                 m.getRole(),
                 m.getStatus(),
-                m.getJoinedAt()
-        )).collect(Collectors.toList());
+                m.getJoinedAt())).collect(Collectors.toList());
     }
 
     @Transactional
     public InvitationDto inviteMember(String orgId, InviteMemberRequest request, UserEntity currentUser) {
         OrganizationMemberEntity member = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), orgId)
-                .orElseThrow(() -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
 
         if (!member.isAdminOrOwner()) {
             throw new IllegalArgumentException("Only Admins and Owners can invite new members.");
@@ -287,11 +328,11 @@ public class OrganizationService {
 
         String token = "inv_" + UUID.randomUUID().toString().replace("-", "");
         LocalDateTime expiresAt = LocalDateTime.now().plusDays(7);
-        String role = (request.getRole() != null && !request.getRole().isBlank()) ? request.getRole().toUpperCase() : "MEMBER";
+        String role = (request.getRole() != null && !request.getRole().isBlank()) ? request.getRole().toUpperCase()
+                : "MEMBER";
 
         OrganizationInvitationEntity invitation = new OrganizationInvitationEntity(
-                org, email, role, token, expiresAt, currentUser
-        );
+                org, email, role, token, expiresAt, currentUser);
         invitation = invitationRepo.save(invitation);
 
         return new InvitationDto(
@@ -302,8 +343,7 @@ public class OrganizationService {
                 invitation.getExpiresAt(),
                 invitation.getStatus(),
                 currentUser.getEmail(),
-                invitation.getCreatedAt()
-        );
+                invitation.getCreatedAt());
     }
 
     @Transactional
@@ -331,7 +371,8 @@ public class OrganizationService {
             Optional<UserEntity> existing = userRepo.findByEmail(inviteEmail);
             if (existing.isPresent()) {
                 user = existing.get();
-                // Ensure the password provided on acceptance is encoded and saved as their active login password
+                // Ensure the password provided on acceptance is encoded and saved as their
+                // active login password
                 if (request.getPassword() != null && !request.getPassword().isBlank()) {
                     if (request.getPassword().length() < 6) {
                         return AuthResponse.error("Password must be at least 6 characters.");
@@ -354,7 +395,8 @@ public class OrganizationService {
             }
         } else {
             // Already authenticated user updating their password optionally
-            if (request.getPassword() != null && !request.getPassword().isBlank() && request.getPassword().length() >= 6) {
+            if (request.getPassword() != null && !request.getPassword().isBlank()
+                    && request.getPassword().length() >= 6) {
                 user.setPassword(passwordEncoder.encode(request.getPassword()));
                 user = userRepo.save(user);
             }
@@ -369,13 +411,20 @@ public class OrganizationService {
         invitation.setStatus("ACCEPTED");
         invitationRepo.save(invitation);
 
+        if (user.getDefaultOrganizationId() == null || user.getDefaultOrganizationId().isBlank()) {
+            user.setDefaultOrganizationId(org.getId());
+            user = userRepo.save(user);
+        }
+
         String token = jwtService.generateToken(user.getEmail(), user.getName(), org.getId(), invitation.getRole());
         OrganizationContext.setCurrentOrganization(org.getId());
 
-        AuthResponse resp = AuthResponse.success(token, user.getEmail(), user.getName(), "Joined " + org.getName() + " successfully!");
+        AuthResponse resp = AuthResponse.success(token, user.getEmail(), user.getName(),
+                "Joined " + org.getName() + " successfully!");
         resp.setActiveOrgId(org.getId());
         resp.setActiveOrgName(org.getName());
         resp.setActiveOrgRole(invitation.getRole());
+        resp.setDefaultOrgId(user.getDefaultOrganizationId());
         resp.setOrganizations(getUserOrganizations(user));
         return resp;
     }
@@ -383,7 +432,8 @@ public class OrganizationService {
     @Transactional(readOnly = true)
     public List<InvitationDto> getInvitations(String orgId, UserEntity currentUser) {
         OrganizationMemberEntity member = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), orgId)
-                .orElseThrow(() -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
 
         if (!member.isAdminOrOwner()) {
             throw new IllegalArgumentException("Only Admins and Owners can view sent invitations.");
@@ -403,15 +453,15 @@ public class OrganizationService {
                     inv.getExpiresAt(),
                     status,
                     inv.getInvitedByUser() != null ? inv.getInvitedByUser().getEmail() : "Admin",
-                    inv.getCreatedAt()
-            );
+                    inv.getCreatedAt());
         }).collect(Collectors.toList());
     }
 
     @Transactional
     public void revokeInvitation(String orgId, Long invitationId, UserEntity currentUser) {
         OrganizationMemberEntity member = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), orgId)
-                .orElseThrow(() -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
 
         if (!member.isAdminOrOwner()) {
             throw new IllegalArgumentException("Only Admins and Owners can revoke invitations.");
@@ -456,14 +506,14 @@ public class OrganizationService {
                 "organizationName", inv.getOrganization().getName(),
                 "organizationSlug", inv.getOrganization().getSlug(),
                 "invitedBy", inv.getInvitedByUser() != null ? inv.getInvitedByUser().getEmail() : "Admin",
-                "expiresAt", inv.getExpiresAt()
-        );
+                "expiresAt", inv.getExpiresAt());
     }
 
     @Transactional
     public MemberDto updateMemberRole(String orgId, Long targetUserId, String newRole, UserEntity currentUser) {
         OrganizationMemberEntity requester = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), orgId)
-                .orElseThrow(() -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
 
         if (!requester.isAdminOrOwner()) {
             throw new IllegalArgumentException("Only Admins and Owners can change member roles.");
@@ -482,14 +532,14 @@ public class OrganizationService {
                 target.getUser().getName(),
                 target.getRole(),
                 target.getStatus(),
-                target.getJoinedAt()
-        );
+                target.getJoinedAt());
     }
 
     @Transactional
     public void removeMember(String orgId, Long targetUserId, UserEntity currentUser) {
         OrganizationMemberEntity requester = memberRepo.findByUserIdAndOrganizationId(currentUser.getId(), orgId)
-                .orElseThrow(() -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Access denied: Not a member of organization " + orgId));
 
         if (!requester.isAdminOrOwner()) {
             throw new IllegalArgumentException("Only Admins and Owners can remove members.");

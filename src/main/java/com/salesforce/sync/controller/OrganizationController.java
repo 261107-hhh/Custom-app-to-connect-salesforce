@@ -233,4 +233,37 @@ public class OrganizationController {
             return ResponseEntity.badRequest().body(Map.of("success", false, "error", e.getMessage()));
         }
     }
+
+    @PostMapping("/{orgId}/default")
+    @Operation(summary = "Set Default Organization", description = "Marks specified organization as user's default workspace for future logins.")
+    public ResponseEntity<?> setDefaultOrgPost(@PathVariable String orgId, Authentication authentication) {
+        return handleSetDefaultOrg(orgId, authentication);
+    }
+
+    @PutMapping("/{orgId}/default")
+    @Operation(summary = "Set Default Organization", description = "Marks specified organization as user's default workspace for future logins.")
+    public ResponseEntity<?> setDefaultOrgPut(@PathVariable String orgId, Authentication authentication) {
+        return handleSetDefaultOrg(orgId, authentication);
+    }
+
+    private ResponseEntity<?> handleSetDefaultOrg(String orgId, Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserEntity user)) {
+            return ResponseEntity.status(401).body(Map.of("success", false, "error", "Unauthorized"));
+        }
+        try {
+            OrgSummaryDto defaultOrg = orgService.setDefaultOrganization(user, orgId);
+            List<OrgSummaryDto> orgs = orgService.getUserOrganizations(user);
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "data", Map.of(
+                            "defaultOrganizationId", orgId,
+                            "defaultOrg", defaultOrg,
+                            "organizations", orgs,
+                            "message", "Default workspace updated successfully to " + defaultOrg.getName()
+                    )
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "error", e.getMessage()));
+        }
+    }
 }

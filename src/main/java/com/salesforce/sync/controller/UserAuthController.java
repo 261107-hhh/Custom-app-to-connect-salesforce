@@ -86,6 +86,8 @@ public class UserAuthController {
             memberRepository.save(member);
             activeOrgId = defaultOrgOpt.get().getId();
             activeOrgName = defaultOrgOpt.get().getName();
+            user.setDefaultOrganizationId(activeOrgId);
+            userRepository.save(user);
         }
 
         String token = jwtService.generateToken(user.getEmail(), user.getName(), activeOrgId, activeOrgRole);
@@ -95,6 +97,7 @@ public class UserAuthController {
         resp.setActiveOrgId(activeOrgId);
         resp.setActiveOrgName(activeOrgName);
         resp.setActiveOrgRole(activeOrgRole);
+        resp.setDefaultOrgId(user.getDefaultOrganizationId());
         resp.setOrganizations(organizationService.getUserOrganizations(user));
         return ResponseEntity.ok(resp);
     }
@@ -119,16 +122,28 @@ public class UserAuthController {
         String activeOrgRole = "USER";
 
         if (!orgs.isEmpty()) {
-            OrgSummaryDto primaryOrg = orgs.get(0);
-            activeOrgId = primaryOrg.getId();
-            activeOrgName = primaryOrg.getName();
-            activeOrgRole = primaryOrg.getRole();
+            OrgSummaryDto selectedOrg = null;
+            String targetDefaultOrgId = user.getDefaultOrganizationId();
+            if (targetDefaultOrgId != null && !targetDefaultOrgId.isBlank()) {
+                selectedOrg = orgs.stream()
+                        .filter(o -> o.getId().equals(targetDefaultOrgId))
+                        .findFirst()
+                        .orElse(null);
+            }
+            if (selectedOrg == null) {
+                selectedOrg = orgs.get(0);
+            }
+            activeOrgId = selectedOrg.getId();
+            activeOrgName = selectedOrg.getName();
+            activeOrgRole = selectedOrg.getRole();
         } else {
             // Auto-link to default org if no org exists
             Optional<OrganizationEntity> defaultOrgOpt = organizationRepository.findById(OrganizationContext.DEFAULT_ORGANIZATION_ID);
             if (defaultOrgOpt.isPresent()) {
                 OrganizationMemberEntity member = new OrganizationMemberEntity(user, defaultOrgOpt.get(), "MEMBER");
                 memberRepository.save(member);
+                user.setDefaultOrganizationId(defaultOrgOpt.get().getId());
+                userRepository.save(user);
                 orgs = organizationService.getUserOrganizations(user);
                 activeOrgId = defaultOrgOpt.get().getId();
                 activeOrgName = defaultOrgOpt.get().getName();
@@ -143,6 +158,7 @@ public class UserAuthController {
         resp.setActiveOrgId(activeOrgId);
         resp.setActiveOrgName(activeOrgName);
         resp.setActiveOrgRole(activeOrgRole);
+        resp.setDefaultOrgId(user.getDefaultOrganizationId());
         resp.setOrganizations(orgs);
         return ResponseEntity.ok(resp);
     }
@@ -165,8 +181,35 @@ public class UserAuthController {
                         "name", user.getName(),
                         "createdAt", user.getCreatedAt(),
                         "activeOrganizationId", currentOrgId,
+                        "defaultOrganizationId", user.getDefaultOrganizationId() != null ? user.getDefaultOrganizationId() : "",
                         "organizations", orgs
                 )
         ));
+    }
+
+    @PostMapping("/default-org")
+    @Operation(summary = "Set Default Organization for User", description = "Sets user's preferred default workspace organization.")
+    public ResponseEntity<?> setDefaultOrgForUser(@RequestBody Map<String, String> body, Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserEntity user)) {
+            return ResponseEntity.status(401).body(Map.of("success", false, "error", "Unauthorized"));
+        }
+        String orgId = body.get("organizationId");
+        if (orgId == null || orgId.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "error", "organizationId is required"));
+        }
+        try {
+            OrgSummaryDto defaultOrg = organizationService.setDefaultOrganization(user, orgId);
+            List<OrgSummaryDto> orgs = organizationService.getUserOrganizations(user);
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "data", Map.of(
+                            "defaultOrganizationId", orgId,
+                            "defaultOrg", defaultOrg,
+                            "organizations", orgs
+                    )
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "error", e.getMessage()));
+        }
     }
 }

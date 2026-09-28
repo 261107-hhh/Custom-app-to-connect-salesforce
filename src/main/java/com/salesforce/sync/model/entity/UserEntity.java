@@ -37,6 +37,9 @@ public class UserEntity {
         this.createdAt = LocalDateTime.now();
     }
 
+    @Column(name = "default_organization_id", length = 100)
+    private String defaultOrganizationId;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -51,4 +54,10 @@ public class UserEntity {
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+
+    public String getDefaultOrganizationId() { return defaultOrganizationId; }
+    public void setDefaultOrganizationId(String defaultOrganizationId) { this.defaultOrganizationId = defaultOrganizationId; }
+
+    public java.util.List<OrganizationMemberEntity> getMemberships() { return memberships; }
+    public void setMemberships(java.util.List<OrganizationMemberEntity> memberships) { this.memberships = memberships; }
 }

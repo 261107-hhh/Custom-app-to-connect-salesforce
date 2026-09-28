@@ -9,10 +9,15 @@ public class OrgSummaryDto {
     private boolean salesforceConnected;
     private String sfAuthMode;
     private String sfInstanceUrl;
+    private boolean isDefault;
 
     public OrgSummaryDto() {}
 
     public OrgSummaryDto(String id, String name, String slug, String role, String status, boolean salesforceConnected, String sfAuthMode, String sfInstanceUrl) {
+        this(id, name, slug, role, status, salesforceConnected, sfAuthMode, sfInstanceUrl, false);
+    }
+
+    public OrgSummaryDto(String id, String name, String slug, String role, String status, boolean salesforceConnected, String sfAuthMode, String sfInstanceUrl, boolean isDefault) {
         this.id = id;
         this.name = name;
         this.slug = slug;
@@ -21,6 +26,7 @@ public class OrgSummaryDto {
         this.salesforceConnected = salesforceConnected;
         this.sfAuthMode = sfAuthMode;
         this.sfInstanceUrl = sfInstanceUrl;
+        this.isDefault = isDefault;
     }
 
     public String getId() { return id; }
@@ -46,4 +52,7 @@ public class OrgSummaryDto {
 
     public String getSfInstanceUrl() { return sfInstanceUrl; }
     public void setSfInstanceUrl(String sfInstanceUrl) { this.sfInstanceUrl = sfInstanceUrl; }
+
+    public boolean isDefault() { return isDefault; }
+    public void setDefault(boolean aDefault) { isDefault = aDefault; }
 }

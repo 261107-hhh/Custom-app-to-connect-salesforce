@@ -12,6 +12,7 @@ public class AuthResponse {
     private String activeOrgName;
     private String activeOrgRole;
     private List<OrgSummaryDto> organizations;
+    private String defaultOrgId;
 
     public AuthResponse() {}
 
@@ -57,4 +58,7 @@ public class AuthResponse {
 
     public List<OrgSummaryDto> getOrganizations() { return organizations; }
     public void setOrganizations(List<OrgSummaryDto> organizations) { this.organizations = organizations; }
+
+    public String getDefaultOrgId() { return defaultOrgId; }
+    public void setDefaultOrgId(String defaultOrgId) { this.defaultOrgId = defaultOrgId; }
 }

@@ -83,13 +83,21 @@ public class SalesforceSyncService {
         currentJob.put("mode", mode);
         currentJob.put("userEmail", effectiveUser);
         currentJob.put("totalRecordsSynced", 0);
+        currentJob.put("filters", Map.of());
         currentJob.put("details", new ConcurrentHashMap<String, Object>());
         currentJob.put("startedAt", LocalDateTime.now().toString());
         currentJob.put("finishedAt", null);
         currentJob.put("error", null);
         currentJob.put("logs", new java.util.concurrent.CopyOnWriteArrayList<Map<String, String>>());
 
-        appendLog("Sync process started for objects: " + String.join(", ", objects) + " [User: " + effectiveUser + "]", "info");
+        currentJob.put("filters", filters != null ? filters : Map.of());
+
+        StringBuilder startMsg = new StringBuilder("Sync process started (" + mode + ") for objects: " + String.join(", ", objects));
+        if (filters != null && !filters.isEmpty()) {
+            startMsg.append(" with filters: ").append(filters);
+        }
+        startMsg.append(" [User: ").append(effectiveUser).append("]");
+        appendLog(startMsg.toString(), "info");
 
         executeSyncAsync(objects, mode, filters, effectiveUser);
 
@@ -238,8 +246,42 @@ public class SalesforceSyncService {
         soql.append(" FROM ").append(objectName);
 
         List<String> whereClauses = new ArrayList<>();
-        if (lastModstamp != null && !lastModstamp.isBlank()) {
+
+        // Extract from/to date range for incremental or custom range sync
+        String fromDate = null;
+        if (filters.containsKey("fromDate") && filters.get("fromDate") != null && !filters.get("fromDate").toString().isBlank()) {
+            fromDate = filters.get("fromDate").toString().trim();
+        } else if (filters.containsKey("modifiedFrom") && filters.get("modifiedFrom") != null && !filters.get("modifiedFrom").toString().isBlank()) {
+            fromDate = filters.get("modifiedFrom").toString().trim();
+        } else if (filters.containsKey("startDate") && filters.get("startDate") != null && !filters.get("startDate").toString().isBlank()) {
+            fromDate = filters.get("startDate").toString().trim();
+        }
+
+        String toDate = null;
+        if (filters.containsKey("toDate") && filters.get("toDate") != null && !filters.get("toDate").toString().isBlank()) {
+            toDate = filters.get("toDate").toString().trim();
+        } else if (filters.containsKey("modifiedTo") && filters.get("modifiedTo") != null && !filters.get("modifiedTo").toString().isBlank()) {
+            toDate = filters.get("modifiedTo").toString().trim();
+        } else if (filters.containsKey("endDate") && filters.get("endDate") != null && !filters.get("endDate").toString().isBlank()) {
+            toDate = filters.get("endDate").toString().trim();
+        }
+
+        // If user explicitly configured a From Date, query records modified on or after that date.
+        // Otherwise, if incremental mode and a previous sync timestamp exists, use SystemModstamp > lastModstamp.
+        if (fromDate != null) {
+            String isoFrom = fromDate.contains("T") ? fromDate : fromDate + "T00:00:00.000Z";
+            whereClauses.add("LastModifiedDate >= " + isoFrom);
+            appendLog("Date range applied: LastModifiedDate >= " + isoFrom, "info");
+        } else if ("incremental".equalsIgnoreCase(mode) && lastModstamp != null && !lastModstamp.isBlank()) {
             whereClauses.add("SystemModstamp > " + lastModstamp);
+            appendLog("Incremental filter applied: SystemModstamp > " + lastModstamp, "info");
+        }
+
+        // Apply To Date constraint (defaulted to current date in UI)
+        if (toDate != null) {
+            String isoTo = toDate.contains("T") ? toDate : toDate + "T23:59:59.999Z";
+            whereClauses.add("LastModifiedDate <= " + isoTo);
+            appendLog("Date range applied: LastModifiedDate <= " + isoTo, "info");
         }
 
         // Handle user filters
@@ -265,18 +307,6 @@ public class SalesforceSyncService {
             String isoDate = val.contains("T") ? val : val + "T23:59:59.999Z";
             whereClauses.add("CreatedDate <= " + isoDate);
             appendLog("Filter applied: CreatedDate <= " + isoDate, "info");
-        }
-        if (filters.containsKey("modifiedFrom") && filters.get("modifiedFrom") != null && !filters.get("modifiedFrom").toString().isBlank()) {
-            String val = filters.get("modifiedFrom").toString().trim();
-            String isoDate = val.contains("T") ? val : val + "T00:00:00.000Z";
-            whereClauses.add("LastModifiedDate >= " + isoDate);
-            appendLog("Filter applied: LastModifiedDate >= " + isoDate, "info");
-        }
-        if (filters.containsKey("modifiedTo") && filters.get("modifiedTo") != null && !filters.get("modifiedTo").toString().isBlank()) {
-            String val = filters.get("modifiedTo").toString().trim();
-            String isoDate = val.contains("T") ? val : val + "T23:59:59.999Z";
-            whereClauses.add("LastModifiedDate <= " + isoDate);
-            appendLog("Filter applied: LastModifiedDate <= " + isoDate, "info");
         }
 
         if (!whereClauses.isEmpty()) {

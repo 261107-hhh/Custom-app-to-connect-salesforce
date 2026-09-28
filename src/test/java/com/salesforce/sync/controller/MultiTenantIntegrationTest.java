@@ -345,4 +345,111 @@ public class MultiTenantIntegrationTest {
                 .andExpect(jsonPath("$.data.records[?(@.Name == 'Wayne Applied Sciences')]").exists())
                 .andExpect(jsonPath("$.data.records[?(@.Name == 'Acme Pediatric Wing')]").doesNotExist());
     }
+
+    @Test
+    void testReadOnlyUserCanSyncButCannotEditOrCreate() throws Exception {
+        // 1. Register Org with Admin/Owner
+        RegisterOrgRequest reg = new RegisterOrgRequest("Audit Global", "audit-global", "Auditor Lead", "lead@audit.org", "LeadPassword123!");
+        MvcResult regRes = mockMvc.perform(post("/api/orgs/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(reg)))
+                .andExpect(status().isOk()).andReturn();
+        String ownerToken = objectMapper.readTree(regRes.getResponse().getContentAsString()).path("token").asText();
+        String orgId = "org_audit-global";
+
+        // 2. Owner invites a READONLY member
+        InviteMemberRequest invite = new InviteMemberRequest("viewer@audit.org", "READONLY");
+        MvcResult inviteRes = mockMvc.perform(post("/api/orgs/" + orgId + "/invitations")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invite)))
+                .andExpect(status().isOk()).andReturn();
+        String inviteToken = objectMapper.readTree(inviteRes.getResponse().getContentAsString()).path("data").path("token").asText();
+
+        // 3. READONLY user accepts invite
+        AcceptInviteRequest accept = new AcceptInviteRequest(inviteToken, "Viewer User", "ViewerPassword123!");
+        MvcResult acceptRes = mockMvc.perform(post("/api/orgs/invitations/accept")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(accept)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activeOrgRole").value("READONLY"))
+                .andReturn();
+        String viewerToken = objectMapper.readTree(acceptRes.getResponse().getContentAsString()).path("token").asText();
+
+        // 4. READONLY user CAN trigger sync
+        mockMvc.perform(post("/api/sync/run")
+                        .header("Authorization", "Bearer " + viewerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"objects\": [\"Account\"], \"mode\": \"incremental\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        // 5. READONLY user CAN query records
+        mockMvc.perform(get("/api/data/Account")
+                        .header("Authorization", "Bearer " + viewerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        // 6. READONLY user CANNOT create records (403 Forbidden)
+        mockMvc.perform(post("/api/data/Account/create")
+                        .header("Authorization", "Bearer " + viewerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"Name\": \"Illegal Account Creation\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error").value("Permission Denied: Users with READONLY role cannot create records."));
+
+        // 7. READONLY user CANNOT edit records (403 Forbidden)
+        mockMvc.perform(put("/api/data/Account/ACC_123")
+                        .header("Authorization", "Bearer " + viewerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"Name\": \"Illegal Account Edit\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error").value("Permission Denied: Users with READONLY role cannot edit records."));
+    }
+
+    @Test
+    void testSetDefaultOrganizationAndLoginSelection() throws Exception {
+        // 1. Register First Organization
+        RegisterOrgRequest reg1 = new RegisterOrgRequest("First Workspace", "first-workspace", "Workspace Admin", "multi@workspace.com", "Pass123456!");
+        MvcResult res1 = mockMvc.perform(post("/api/orgs/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(reg1)))
+                .andExpect(status().isOk()).andReturn();
+        String token1 = objectMapper.readTree(res1.getResponse().getContentAsString()).path("token").asText();
+
+        // 2. Create Second Organization under same user
+        CreateOrgRequest createOrg2 = new CreateOrgRequest("Second Workspace", "second-workspace");
+        MvcResult res2 = mockMvc.perform(post("/api/orgs")
+                        .header("Authorization", "Bearer " + token1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(createOrg2)))
+                .andExpect(status().isOk()).andReturn();
+        String orgId2 = objectMapper.readTree(res2.getResponse().getContentAsString()).path("data").path("id").asText();
+
+        // 3. Mark Second Workspace as Default Workspace
+        mockMvc.perform(post("/api/orgs/" + orgId2 + "/default")
+                        .header("Authorization", "Bearer " + token1))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.defaultOrganizationId").value(orgId2))
+                .andExpect(jsonPath("$.data.defaultOrg.default").value(true));
+
+        // 4. Verify /api/users/me returns defaultOrganizationId
+        mockMvc.perform(get("/api/users/me")
+                        .header("Authorization", "Bearer " + token1))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.defaultOrganizationId").value(orgId2));
+
+        // 5. User logs in again -> Second Workspace MUST be selected as activeOrgId!
+        LoginRequest loginReq = new LoginRequest("multi@workspace.com", "Pass123456!");
+        mockMvc.perform(post("/api/users/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activeOrgId").value(orgId2))
+                .andExpect(jsonPath("$.defaultOrgId").value(orgId2))
+                .andExpect(jsonPath("$.organizations[?(@.id == '" + orgId2 + "')].default").value(true));
+    }
 }
