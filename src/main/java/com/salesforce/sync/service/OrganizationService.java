@@ -30,6 +30,7 @@ public class OrganizationService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final EncryptionService encryptionService;
+    private final MultiTenantSalesforceClientProvider clientProvider;
 
     public OrganizationService(OrganizationRepository orgRepo,
             OrganizationMemberRepository memberRepo,
@@ -37,7 +38,8 @@ public class OrganizationService {
             UserRepository userRepo,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
-            EncryptionService encryptionService) {
+            EncryptionService encryptionService,
+            @org.springframework.context.annotation.Lazy MultiTenantSalesforceClientProvider clientProvider) {
         this.orgRepo = orgRepo;
         this.memberRepo = memberRepo;
         this.invitationRepo = invitationRepo;
@@ -45,6 +47,7 @@ public class OrganizationService {
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.encryptionService = encryptionService;
+        this.clientProvider = clientProvider;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -258,6 +261,9 @@ public class OrganizationService {
         }
         org.setUpdatedAt(LocalDateTime.now());
         org = orgRepo.save(org);
+        if (clientProvider != null) {
+            clientProvider.evictCache(orgId);
+        }
 
         return mapToDetailDto(org, member.getRole());
     }
@@ -282,6 +288,9 @@ public class OrganizationService {
         org.setSfSecurityTokenEncrypted(null);
         org.setUpdatedAt(LocalDateTime.now());
         org = orgRepo.save(org);
+        if (clientProvider != null) {
+            clientProvider.evictCache(orgId);
+        }
 
         return mapToDetailDto(org, member.getRole());
     }

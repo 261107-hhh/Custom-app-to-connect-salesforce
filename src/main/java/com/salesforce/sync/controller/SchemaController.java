@@ -1,5 +1,6 @@
 package com.salesforce.sync.controller;
 
+import com.salesforce.sync.service.MultiTenantSalesforceClientProvider;
 import com.salesforce.sync.service.SalesforceClientService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -13,17 +14,29 @@ import java.util.*;
 @Tag(name = "Schema Introspection", description = "Salesforce object metadata, field types, and creatable fields")
 public class SchemaController {
 
-    private final SalesforceClientService sfClient;
+    private final SalesforceClientService defaultClient;
+    private final MultiTenantSalesforceClientProvider clientProvider;
 
-    public SchemaController(SalesforceClientService sfClient) {
-        this.sfClient = sfClient;
+    public SchemaController(SalesforceClientService defaultClient) {
+        this(defaultClient, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SchemaController(SalesforceClientService defaultClient,
+                            @org.springframework.beans.factory.annotation.Autowired(required = false) MultiTenantSalesforceClientProvider clientProvider) {
+        this.defaultClient = defaultClient;
+        this.clientProvider = clientProvider;
+    }
+
+    private SalesforceClientService getClient() {
+        return (clientProvider != null) ? clientProvider.getClientForCurrentOrganization() : defaultClient;
     }
 
     @GetMapping
     @Operation(summary = "Supported Objects / Global Describe", description = "Returns queryable Salesforce sObjects metadata.")
     public ResponseEntity<?> getSupportedObjects() {
         try {
-            com.fasterxml.jackson.databind.JsonNode globalDesc = sfClient.describeGlobal();
+            com.fasterxml.jackson.databind.JsonNode globalDesc = getClient().describeGlobal();
             List<Map<String, Object>> sobjects = new ArrayList<>();
             if (globalDesc.has("sobjects") && globalDesc.path("sobjects").isArray()) {
                 for (com.fasterxml.jackson.databind.JsonNode o : globalDesc.path("sobjects")) {
@@ -61,7 +74,7 @@ public class SchemaController {
     @Operation(summary = "Describe Object Schema", description = "Fetches the full Salesforce describe payload for the specified object.")
     public ResponseEntity<?> describeObject(@PathVariable String name) {
         try {
-            return ResponseEntity.ok(Map.of("success", true, "data", sfClient.describeObject(name)));
+            return ResponseEntity.ok(Map.of("success", true, "data", getClient().describeObject(name)));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "error", e.getMessage()));
         }
@@ -71,7 +84,7 @@ public class SchemaController {
     @Operation(summary = "Get Creatable Fields", description = "Returns introspected fields that are creatable, with types, labels, and picklist options.")
     public ResponseEntity<?> getCreatableFields(@PathVariable String name) {
         try {
-            List<Map<String, Object>> fields = sfClient.getCreatableFields(name);
+            List<Map<String, Object>> fields = getClient().getCreatableFields(name);
             return ResponseEntity.ok(Map.of("success", true, "data", fields));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "error", e.getMessage()));

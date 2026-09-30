@@ -45,18 +45,30 @@ public class MultiTenantSalesforceClientProvider {
     }
 
     public SalesforceClientService getClientForOrganization(String orgId) {
-        if (orgId == null || OrganizationContext.DEFAULT_ORGANIZATION_ID.equalsIgnoreCase(orgId)) {
+        String effectiveOrg = (orgId != null && !orgId.isBlank()) ? orgId.trim() : OrganizationContext.DEFAULT_ORGANIZATION_ID;
+
+        // For default_org, use defaultClient unless an explicit non-disconnected tenant integration is configured
+        if (OrganizationContext.DEFAULT_ORGANIZATION_ID.equalsIgnoreCase(effectiveOrg)) {
+            Optional<OrganizationEntity> defaultOrgOpt = orgRepo.findById(OrganizationContext.DEFAULT_ORGANIZATION_ID);
+            if (defaultOrgOpt.isEmpty() || defaultOrgOpt.get().getSfAuthMode() == null || "disconnected".equalsIgnoreCase(defaultOrgOpt.get().getSfAuthMode())) {
+                return defaultClient;
+            }
+        }
+
+        // If organization is not found in database, fall back to defaultClient (e.g. for standalone tests)
+        Optional<OrganizationEntity> orgOpt = orgRepo.findById(effectiveOrg);
+        if (orgOpt.isEmpty()) {
             return defaultClient;
         }
 
-        return clientCache.computeIfAbsent(orgId, id -> {
-            Optional<OrganizationEntity> orgOpt = orgRepo.findById(id);
-            if (orgOpt.isEmpty()) {
+        return clientCache.computeIfAbsent(effectiveOrg, id -> {
+            Optional<OrganizationEntity> currentOrgOpt = orgRepo.findById(id);
+            if (currentOrgOpt.isEmpty()) {
                 log.warn("Organization {} not found in database, falling back to default client", id);
                 return defaultClient;
             }
 
-            OrganizationEntity org = orgOpt.get();
+            OrganizationEntity org = currentOrgOpt.get();
             String mode = org.getSfAuthMode();
 
             if (mode == null || "disconnected".equalsIgnoreCase(mode)) {
@@ -99,6 +111,7 @@ public class MultiTenantSalesforceClientProvider {
                 client.connect(creds);
             } catch (Exception e) {
                 log.error("Failed to connect Salesforce client for organization {}: {}", id, e.getMessage());
+                throw new RuntimeException("Failed to connect Salesforce client for organization " + id + ": " + e.getMessage(), e);
             }
 
             return client;
@@ -106,9 +119,11 @@ public class MultiTenantSalesforceClientProvider {
     }
 
     public void evictCache(String orgId) {
-        SalesforceClientService removed = clientCache.remove(orgId);
-        if (removed != null) {
-            log.info("Evicted Salesforce client cache for organization {}", orgId);
+        if (orgId != null) {
+            SalesforceClientService removed = clientCache.remove(orgId);
+            if (removed != null) {
+                log.info("Evicted Salesforce client cache for organization {}", orgId);
+            }
         }
     }
 }

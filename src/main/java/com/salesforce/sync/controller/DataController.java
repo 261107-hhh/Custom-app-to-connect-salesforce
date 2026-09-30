@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import com.salesforce.sync.model.entity.*;
 import com.salesforce.sync.repository.*;
 import com.salesforce.sync.security.SecurityUtils;
+import com.salesforce.sync.service.MultiTenantSalesforceClientProvider;
 import com.salesforce.sync.service.SalesforceClientService;
 import com.salesforce.sync.service.SalesforceSchemaRegistry;
 import io.swagger.v3.oas.annotations.Operation;
@@ -38,6 +39,7 @@ public class DataController {
     private final OpportunityRepository opportunityRepo;
     private final LeadRepository leadRepo;
     private final SalesforceClientService sfClient;
+    private final MultiTenantSalesforceClientProvider clientProvider;
     private final ObjectMapper objectMapper;
     private final SalesforceSchemaRegistry schemaRegistry;
     private final OrganizationMemberRepository memberRepo;
@@ -48,7 +50,7 @@ public class DataController {
                           LeadRepository leadRepo,
                           SalesforceClientService sfClient,
                           ObjectMapper objectMapper) {
-        this(accountRepo, contactRepo, opportunityRepo, leadRepo, sfClient, objectMapper, new SalesforceSchemaRegistry(), null);
+        this(accountRepo, contactRepo, opportunityRepo, leadRepo, sfClient, null, objectMapper, new SalesforceSchemaRegistry(), null);
     }
 
     public DataController(AccountRepository accountRepo,
@@ -58,7 +60,7 @@ public class DataController {
                           SalesforceClientService sfClient,
                           ObjectMapper objectMapper,
                           SalesforceSchemaRegistry schemaRegistry) {
-        this(accountRepo, contactRepo, opportunityRepo, leadRepo, sfClient, objectMapper, schemaRegistry, null);
+        this(accountRepo, contactRepo, opportunityRepo, leadRepo, sfClient, null, objectMapper, schemaRegistry, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -67,6 +69,7 @@ public class DataController {
                           OpportunityRepository opportunityRepo,
                           LeadRepository leadRepo,
                           SalesforceClientService sfClient,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) MultiTenantSalesforceClientProvider clientProvider,
                           ObjectMapper objectMapper,
                           SalesforceSchemaRegistry schemaRegistry,
                           @org.springframework.beans.factory.annotation.Autowired(required = false) OrganizationMemberRepository memberRepo) {
@@ -75,6 +78,7 @@ public class DataController {
         this.opportunityRepo = opportunityRepo;
         this.leadRepo = leadRepo;
         this.sfClient = sfClient;
+        this.clientProvider = clientProvider;
         this.objectMapper = objectMapper;
         this.schemaRegistry = schemaRegistry != null ? schemaRegistry : new SalesforceSchemaRegistry();
         this.memberRepo = memberRepo;
@@ -247,9 +251,12 @@ public class DataController {
 
             // 2. Push to Salesforce if connected
             String newId = null;
-            if (sfClient.isConnected()) {
+            SalesforceClientService client = (clientProvider != null)
+                    ? clientProvider.getClientForCurrentOrganization()
+                    : this.sfClient;
+            if (client.isConnected()) {
                 try {
-                    Map<String, Object> sfResult = sfClient.createRecord(objectName, fieldsToSave);
+                    Map<String, Object> sfResult = client.createRecord(objectName, fieldsToSave);
                     newId = (String) sfResult.get("id");
                 } catch (Exception sfEx) {
                     log.warn("[DataController] Salesforce live create failed for " + objectName + ": " + sfEx.getMessage());
@@ -386,14 +393,17 @@ public class DataController {
             fieldsToUpdate.remove("_opportunity_count");
 
             // 1. Update in Salesforce if connected
-            if (sfClient.isConnected()) {
+            SalesforceClientService client = (clientProvider != null)
+                    ? clientProvider.getClientForCurrentOrganization()
+                    : this.sfClient;
+            if (client.isConnected()) {
                 try {
                     Map<String, Object> sfPayload = new LinkedHashMap<>();
                     for (Map.Entry<String, Object> entry : fieldsToUpdate.entrySet()) {
                         Object v = entry.getValue();
                         sfPayload.put(entry.getKey(), "".equals(v) ? null : v);
                     }
-                    sfClient.updateRecord(objectName, id, sfPayload);
+                    client.updateRecord(objectName, id, sfPayload);
                 } catch (Exception sfEx) {
                     log.warn("[DataController] Salesforce live update failed for " + objectName + " " + id + ": " + sfEx.getMessage());
                 }

@@ -415,6 +415,9 @@ public class SalesforceClientService {
     }
 
     private void saveConnectionConfig() {
+        if (this.configRepository == null) {
+            return;
+        }
         try {
             Map<String, Object> cfg = new HashMap<>();
             cfg.put("mode", this.mode);

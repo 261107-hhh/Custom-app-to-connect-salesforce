@@ -1,5 +1,6 @@
 package com.salesforce.sync.controller;
 
+import com.salesforce.sync.service.MultiTenantSalesforceClientProvider;
 import com.salesforce.sync.service.SalesforceClientService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -13,17 +14,29 @@ import java.util.Map;
 @Tag(name = "Salesforce Connection", description = "Manage Salesforce OAuth and sandbox connections")
 public class AuthController {
 
-    private final SalesforceClientService sfClient;
+    private final SalesforceClientService defaultClient;
+    private final MultiTenantSalesforceClientProvider clientProvider;
 
-    public AuthController(SalesforceClientService sfClient) {
-        this.sfClient = sfClient;
+    public AuthController(SalesforceClientService defaultClient) {
+        this(defaultClient, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AuthController(SalesforceClientService defaultClient,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false) MultiTenantSalesforceClientProvider clientProvider) {
+        this.defaultClient = defaultClient;
+        this.clientProvider = clientProvider;
+    }
+
+    private SalesforceClientService getClient() {
+        return (clientProvider != null) ? clientProvider.getClientForCurrentOrganization() : defaultClient;
     }
 
     @PostMapping("/connect")
     @Operation(summary = "Connect to Salesforce", description = "Authenticate via External Client App (Client Credentials), Username/Password, or Mock Mode.")
     public ResponseEntity<?> connect(@RequestBody Map<String, Object> credentials) {
         try {
-            Map<String, Object> result = sfClient.connect(credentials);
+            Map<String, Object> result = getClient().connect(credentials);
             return ResponseEntity.ok(Map.of("success", true, "data", result));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "error", e.getMessage()));
@@ -33,13 +46,13 @@ public class AuthController {
     @PostMapping("/disconnect")
     @Operation(summary = "Disconnect Salesforce", description = "Clears active session credentials.")
     public ResponseEntity<?> disconnect() {
-        sfClient.disconnect();
+        getClient().disconnect();
         return ResponseEntity.ok(Map.of("success", true, "data", Map.of("message", "Disconnected from Salesforce.")));
     }
 
     @GetMapping("/status")
     @Operation(summary = "Salesforce Connection Status", description = "Returns whether the application is connected to a live Salesforce org or mock sandbox.")
     public ResponseEntity<?> getStatus() {
-        return ResponseEntity.ok(Map.of("success", true, "data", sfClient.getStatus()));
+        return ResponseEntity.ok(Map.of("success", true, "data", getClient().getStatus()));
     }
 }
