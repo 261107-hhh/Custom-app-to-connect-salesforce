@@ -21,7 +21,7 @@ public class MockSalesforceService {
     private final Map<String, List<Map<String, Object>>> dataStore = new ConcurrentHashMap<>();
 
     private static final Pattern MODSTAMP_PATTERN = Pattern.compile("SystemModstamp\\s*>\\s*([^\\s]+)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern NAME_LIKE_PATTERN = Pattern.compile("Name\\s+LIKE\\s+'%([^%']+)%'", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NAME_LIKE_PATTERN = Pattern.compile("(?:Name|LastName|FirstName)\\s+LIKE\\s+'%([^%']+)%'", Pattern.CASE_INSENSITIVE);
     private static final Pattern CREATED_FROM_PATTERN = Pattern.compile("CreatedDate\\s*>=\\s*([^\\s]+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern CREATED_TO_PATTERN = Pattern.compile("CreatedDate\\s*<=\\s*([^\\s]+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern MOD_FROM_PATTERN = Pattern.compile("LastModifiedDate\\s*>=\\s*([^\\s]+)", Pattern.CASE_INSENSITIVE);
@@ -64,29 +64,38 @@ public class MockSalesforceService {
     }
 
     private void initMockData() {
+        java.time.Instant now = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String tRecent = now.minus(java.time.Duration.ofDays(2)).toString();
+        String tMedium = now.minus(java.time.Duration.ofDays(10)).toString();
+        String tOlder = now.minus(java.time.Duration.ofDays(45)).toString();
+
         // Accounts
         List<Map<String, Object>> accounts = new CopyOnWriteArrayList<>();
-        accounts.add(createAccountMap("001mock000000001AAA", "Acme Corporation", "Manufacturing", "San Francisco", "Software", 50000000.0, "(555) 123-4567", "https://acme.example.com", "2026-01-10T08:00:00.000Z"));
-        accounts.add(createAccountMap("001mock000000002AAA", "Global Cloud Innovations", "Technology", "Austin", "Enterprise Cloud", 120000000.0, "(555) 234-5678", "https://globalcloud.example.io", "2026-01-12T08:00:00.000Z"));
-        accounts.add(createAccountMap("001mock000000003AAA", "Apex Health Systems", "Healthcare", "Boston", "Hospital Care", 85000000.0, "(555) 345-6789", "https://apexhealth.example.org", "2026-01-15T08:00:00.000Z"));
+        accounts.add(createAccountMap("001mock000000001AAA", "Acme Corporation", "Manufacturing", "San Francisco", "Software", 50000000.0, "(555) 123-4567", "https://acme.example.com", tOlder));
+        accounts.add(createAccountMap("001mock000000002AAA", "Global Cloud Innovations", "Technology", "Austin", "Enterprise Cloud", 120000000.0, "(555) 234-5678", "https://globalcloud.example.io", tMedium));
+        accounts.add(createAccountMap("001mock000000003AAA", "Apex Health Systems", "Healthcare", "Boston", "Hospital Care", 85000000.0, "(555) 345-6789", "https://apexhealth.example.org", tRecent));
+        accounts.add(createAccountMap("001mock000000004AAA", "Suraj Enterprise", "Consulting", "Noida", "Customer - Direct", 45000000.0, "(555) 789-0123", "https://surajenterprise.example.com", tRecent));
         dataStore.put("Account", accounts);
 
         // Contacts
         List<Map<String, Object>> contacts = new CopyOnWriteArrayList<>();
-        contacts.add(createContactMap("003mock000000001AAA", "Sarah", "Connor", "VP Operations", "sarah@acme.corp", "(555) 123-4568", "Operations", "001mock000000001AAA", "2026-01-16T08:00:00.000Z"));
-        contacts.add(createContactMap("003mock000000002AAA", "David", "Kim", "Chief Architect", "david@globalcloud.io", "(555) 234-5679", "Engineering", "001mock000000002AAA", "2026-01-18T08:00:00.000Z"));
+        contacts.add(createContactMap("003mock000000001AAA", "Sarah", "Connor", "VP Operations", "sarah@acme.corp", "(555) 123-4568", "Operations", "001mock000000001AAA", tMedium));
+        contacts.add(createContactMap("003mock000000002AAA", "David", "Kim", "Chief Architect", "david@globalcloud.io", "(555) 234-5679", "Engineering", "001mock000000002AAA", tRecent));
+        contacts.add(createContactMap("003mock000000003AAA", "Suraj", "Verma", "Director of IT", "suraj@oodles.io", "(555) 789-0124", "Information Technology", "001mock000000004AAA", tRecent));
         dataStore.put("Contact", contacts);
 
         // Opportunities
         List<Map<String, Object>> opportunities = new CopyOnWriteArrayList<>();
-        opportunities.add(createOpportunityMap("006mock000000001AAA", "Acme - Enterprise Cloud Migration", "Proposal/Price Quote", 125000.0, "2026-11-30", 75.0, "New Business", "001mock000000001AAA", "2026-01-20T08:00:00.000Z"));
-        opportunities.add(createOpportunityMap("006mock000000002AAA", "Global Cloud - AI Analytics License", "Closed Won", 280000.0, "2026-10-15", 100.0, "Existing Customer - Upgrade", "001mock000000002AAA", "2026-01-22T08:00:00.000Z"));
+        opportunities.add(createOpportunityMap("006mock000000001AAA", "Acme - Enterprise Cloud Migration", "Proposal/Price Quote", 125000.0, "2026-11-30", 75.0, "New Business", "001mock000000001AAA", tMedium));
+        opportunities.add(createOpportunityMap("006mock000000002AAA", "Global Cloud - AI Analytics License", "Closed Won", 280000.0, "2026-10-15", 100.0, "Existing Customer - Upgrade", "001mock000000002AAA", tRecent));
+        opportunities.add(createOpportunityMap("006mock000000003AAA", "Suraj Enterprise - Cloud ERP Integration", "Negotiation/Review", 350000.0, "2026-12-15", 85.0, "New Business", "001mock000000004AAA", tRecent));
         dataStore.put("Opportunity", opportunities);
 
         // Leads
         List<Map<String, Object>> leads = new CopyOnWriteArrayList<>();
-        leads.add(createLeadMap("00Qmock000000001AAA", "Elena", "Rostova", "Horizon Logistics", "elena@horizon.test", "(555) 456-7890", "Director of Procurement", "Open - Not Contacted", "2026-01-25T08:00:00.000Z"));
-        leads.add(createLeadMap("00Qmock000000002AAA", "Marcus", "Vance", "Quantum Dynamics", "marcus@quantum.test", "(555) 567-8901", "VP Engineering", "Working - Contacted", "2026-01-28T08:00:00.000Z"));
+        leads.add(createLeadMap("00Qmock000000001AAA", "Elena", "Rostova", "Horizon Logistics", "elena@horizon.test", "(555) 456-7890", "Director of Procurement", "Open - Not Contacted", tMedium));
+        leads.add(createLeadMap("00Qmock000000002AAA", "Marcus", "Vance", "Quantum Dynamics", "marcus@quantum.test", "(555) 567-8901", "VP Engineering", "Working - Contacted", tRecent));
+        leads.add(createLeadMap("00Qmock000000003AAA", "Suraj", "Kumar", "Suraj Technologies", "suraj.lead@oodles.test", "(555) 789-0125", "Lead Engineer", "Open - Not Contacted", tRecent));
         dataStore.put("Lead", leads);
     }
 
@@ -148,31 +157,36 @@ public class MockSalesforceService {
         for (Map<String, Object> rec : allRecords) {
             if (modstampFilter != null && !modstampFilter.isBlank()) {
                 String stamp = (String) rec.get("SystemModstamp");
-                if (stamp == null || stamp.compareTo(modstampFilter) <= 0) {
+                if (stamp == null || compareTimestamps(stamp, modstampFilter) <= 0) {
                     continue;
                 }
             }
             if (nameFilter != null && !nameFilter.isBlank()) {
                 String name = (String) rec.get("Name");
-                if (name == null || !name.toLowerCase().contains(nameFilter)) {
+                String fn = (String) rec.get("FirstName");
+                String ln = (String) rec.get("LastName");
+                boolean matches = (name != null && name.toLowerCase().contains(nameFilter))
+                        || (fn != null && fn.toLowerCase().contains(nameFilter))
+                        || (ln != null && ln.toLowerCase().contains(nameFilter));
+                if (!matches) {
                     continue;
                 }
             }
             if (createdFrom != null && !createdFrom.isBlank()) {
                 String cd = (String) rec.get("CreatedDate");
-                if (cd == null || cd.compareTo(createdFrom) < 0) continue;
+                if (cd == null || compareTimestamps(cd, createdFrom) < 0) continue;
             }
             if (createdTo != null && !createdTo.isBlank()) {
                 String cd = (String) rec.get("CreatedDate");
-                if (cd == null || cd.compareTo(createdTo) > 0) continue;
+                if (cd == null || compareTimestamps(cd, createdTo) > 0) continue;
             }
             if (modFrom != null && !modFrom.isBlank()) {
                 String md = (String) rec.get("LastModifiedDate");
-                if (md == null || md.compareTo(modFrom) < 0) continue;
+                if (md == null || compareTimestamps(md, modFrom) < 0) continue;
             }
             if (modTo != null && !modTo.isBlank()) {
                 String md = (String) rec.get("LastModifiedDate");
-                if (md == null || md.compareTo(modTo) > 0) continue;
+                if (md == null || compareTimestamps(md, modTo) > 0) continue;
             }
             filtered.add(rec);
         }
@@ -208,7 +222,7 @@ public class MockSalesforceService {
         if (fields != null) {
             found.putAll(fields);
         }
-        String now = Instant.now().toString();
+        String now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString();
         found.put("LastModifiedDate", now);
         found.put("SystemModstamp", now);
         if (fields != null && (fields.containsKey("FirstName") || fields.containsKey("LastName"))) {
@@ -229,7 +243,7 @@ public class MockSalesforceService {
         };
 
         String newId = prefix + "mock" + UUID.randomUUID().toString().substring(0, 10).replace("-", "");
-        String now = Instant.now().toString();
+        String now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString();
 
         Map<String, Object> inputFields = fields != null ? new LinkedHashMap<>(fields) : new LinkedHashMap<>();
         Map<String, Object> record = schemaRegistry.normalizeRecord(canonicalObject, inputFields, null);
@@ -260,7 +274,21 @@ public class MockSalesforceService {
         String canonicalObject = capitalize(objectName);
         List<Map<String, Object>> list = dataStore.computeIfAbsent(canonicalObject, k -> new CopyOnWriteArrayList<>());
         int count = list.size() + 1;
-        String now = Instant.now().toString();
+        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+
+        // Guarantee simulated record is strictly newer than any existing record in dataStore
+        for (Map<String, Object> rec : list) {
+            String existingStamp = (String) rec.get("SystemModstamp");
+            if (existingStamp != null) {
+                try {
+                    Instant existing = Instant.parse(existingStamp);
+                    if (!existing.isBefore(now)) {
+                        now = existing.plusSeconds(1);
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+        String nowStr = now.toString();
 
         Map<String, Object> raw = new LinkedHashMap<>();
         if ("Account".equalsIgnoreCase(canonicalObject)) {
@@ -303,9 +331,9 @@ public class MockSalesforceService {
             raw.put("Status", "Open - Not Contacted");
         }
 
-        raw.put("CreatedDate", now);
-        raw.put("LastModifiedDate", now);
-        raw.put("SystemModstamp", now);
+        raw.put("CreatedDate", nowStr);
+        raw.put("LastModifiedDate", nowStr);
+        raw.put("SystemModstamp", nowStr);
 
         Map<String, Object> newRec = schemaRegistry.normalizeRecord(canonicalObject, raw, null);
         list.add(newRec);
@@ -324,6 +352,37 @@ public class MockSalesforceService {
     private String capitalize(String str) {
         if (str == null || str.isBlank()) return "Account";
         return Character.toUpperCase(str.charAt(0)) + str.substring(1);
+    }
+
+    private int compareTimestamps(String ts1, String ts2) {
+        if (ts1 == null && ts2 == null) return 0;
+        if (ts1 == null) return -1;
+        if (ts2 == null) return 1;
+        try {
+            java.time.Instant i1 = parseInstant(ts1);
+            java.time.Instant i2 = parseInstant(ts2);
+            if (i1 != null && i2 != null) {
+                return i1.compareTo(i2);
+            }
+        } catch (Exception ignored) {}
+        return ts1.compareTo(ts2);
+    }
+
+    private java.time.Instant parseInstant(String s) {
+        if (s == null || s.isBlank()) return null;
+        s = s.trim().replace("'", "");
+        if (s.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+            return java.time.LocalDate.parse(s).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        }
+        try {
+            return java.time.Instant.parse(s);
+        } catch (Exception e) {
+            try {
+                return java.time.OffsetDateTime.parse(s).toInstant();
+            } catch (Exception ex) {
+                return null;
+            }
+        }
     }
 
     private Map<String, Object> createAccountMap(String id, String name, String industry, String city, String type, Double revenue, String phone, String website, String date) {

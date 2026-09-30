@@ -147,7 +147,7 @@ public class DataController {
                 map.put("_opportunity_count", a.getOpportunities() != null ? a.getOpportunities().stream().filter(o -> o.isAssociatedWithUser(userEmail)).count() : 0);
                 records.add(map);
             }
-            columns = List.of("Id", "Name", "Type", "Industry", "Phone", "BillingCity", "AnnualRevenue", "Website", "custom_app_created_by", "synced_by");
+            columns = List.of("Id", "Name", "Type", "Industry", "Phone", "BillingCity", "AnnualRevenue", "Website", "custom_app_created_by", "syncedBy");
 
         } else if ("contact".equals(lower)) {
             Page<ContactEntity> conPage = contactRepo.searchContactsByUser(userEmail, search, pageable);
@@ -157,7 +157,7 @@ public class DataController {
             for (ContactEntity c : conPage.getContent()) {
                 records.add(convertEntityToDetailMap(c));
             }
-            columns = List.of("Id", "Name", "Title", "Email", "Phone", "Department", "Account_Name", "custom_app_created_by", "synced_by");
+            columns = List.of("Id", "Name", "Title", "Email", "Phone", "Department", "Account_Name", "custom_app_created_by", "syncedBy");
 
         } else if ("opportunity".equals(lower)) {
             Page<OpportunityEntity> oppPage = opportunityRepo.searchOpportunitiesByUser(userEmail, search, pageable);
@@ -167,7 +167,7 @@ public class DataController {
             for (OpportunityEntity o : oppPage.getContent()) {
                 records.add(convertEntityToDetailMap(o));
             }
-            columns = List.of("Id", "Name", "StageName", "Amount", "CloseDate", "Probability", "Type", "Account_Name", "custom_app_created_by", "synced_by");
+            columns = List.of("Id", "Name", "StageName", "Amount", "CloseDate", "Probability", "Type", "Account_Name", "custom_app_created_by", "syncedBy");
 
         } else if ("lead".equals(lower)) {
             Page<LeadEntity> leadPage = leadRepo.searchLeadsByUser(userEmail, search, pageable);
@@ -177,7 +177,7 @@ public class DataController {
             for (LeadEntity l : leadPage.getContent()) {
                 records.add(convertEntityToDetailMap(l));
             }
-            columns = List.of("Id", "Name", "Company", "Status", "Title", "Email", "Phone", "custom_app_created_by", "synced_by");
+            columns = List.of("Id", "Name", "Company", "Status", "Title", "Email", "Phone", "custom_app_created_by", "syncedBy");
         }
 
         return ResponseEntity.ok(Map.of(
@@ -781,8 +781,8 @@ public class DataController {
         if (map.containsKey("customAppModifiedAt")) normalized.put("customAppModifiedAt", map.get("customAppModifiedAt"));
         if (map.containsKey("is_custom_app_created")) normalized.put("is_custom_app_created", map.get("is_custom_app_created"));
         if (map.containsKey("isCustomAppCreated")) normalized.put("isCustomAppCreated", map.get("isCustomAppCreated"));
-        if (map.containsKey("synced_by")) normalized.put("synced_by", map.get("synced_by"));
         if (map.containsKey("syncedBy")) normalized.put("syncedBy", map.get("syncedBy"));
+        normalized.remove("synced_by");
         normalized.put("raw_data", rawData);
 
         return normalized;
@@ -799,7 +799,6 @@ public class DataController {
         map.put("customAppModifiedAt", b.getCustomAppModifiedAt());
         map.put("is_custom_app_created", b.getIsCustomAppCreated());
         map.put("isCustomAppCreated", b.getIsCustomAppCreated());
-        map.put("synced_by", b.getSyncedBy());
         map.put("syncedBy", b.getSyncedBy());
     }
 

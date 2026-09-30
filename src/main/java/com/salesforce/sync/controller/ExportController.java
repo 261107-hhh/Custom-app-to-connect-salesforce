@@ -73,7 +73,7 @@ public class ExportController {
                 map.put("custom_app_created_by", a.getCustomAppCreatedBy());
                 map.put("custom_app_modified_by", a.getCustomAppModifiedBy());
                 map.put("is_custom_app_created", a.getIsCustomAppCreated());
-                map.put("synced_by", a.getSyncedBy());
+                map.put("syncedBy", a.getSyncedBy());
                 map.put("raw_data", a.getRawData());
                 records.add(map);
             }
@@ -97,7 +97,7 @@ public class ExportController {
                 map.put("custom_app_created_by", c.getCustomAppCreatedBy());
                 map.put("custom_app_modified_by", c.getCustomAppModifiedBy());
                 map.put("is_custom_app_created", c.getIsCustomAppCreated());
-                map.put("synced_by", c.getSyncedBy());
+                map.put("syncedBy", c.getSyncedBy());
                 map.put("raw_data", c.getRawData());
                 records.add(map);
             }
@@ -120,7 +120,7 @@ public class ExportController {
                 map.put("custom_app_created_by", o.getCustomAppCreatedBy());
                 map.put("custom_app_modified_by", o.getCustomAppModifiedBy());
                 map.put("is_custom_app_created", o.getIsCustomAppCreated());
-                map.put("synced_by", o.getSyncedBy());
+                map.put("syncedBy", o.getSyncedBy());
                 map.put("raw_data", o.getRawData());
                 records.add(map);
             }
@@ -143,7 +143,7 @@ public class ExportController {
                 map.put("custom_app_created_by", l.getCustomAppCreatedBy());
                 map.put("custom_app_modified_by", l.getCustomAppModifiedBy());
                 map.put("is_custom_app_created", l.getIsCustomAppCreated());
-                map.put("synced_by", l.getSyncedBy());
+                map.put("syncedBy", l.getSyncedBy());
                 map.put("raw_data", l.getRawData());
                 records.add(map);
             }

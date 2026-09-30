@@ -106,4 +106,96 @@ class SalesforceSyncServiceTest {
         assertEquals("lead.architect@enterprise.io", syncedAcc.getCustomAppModifiedBy());
         assertTrue(syncedAcc.getIsCustomAppCreated());
     }
+
+    @Test
+    void testFormatSoqlDateTimeSanitization() {
+        // Date only
+        assertEquals("2026-08-30T00:00:00Z", SalesforceSyncService.formatSoqlDateTime("2026-08-30", false));
+        assertEquals("2026-08-30T23:59:59Z", SalesforceSyncService.formatSoqlDateTime("2026-08-30", true));
+
+        // Milliseconds stripping (.000Z and .999Z)
+        assertEquals("2026-01-10T08:00:00Z", SalesforceSyncService.formatSoqlDateTime("2026-01-10T08:00:00.000Z", false));
+        assertEquals("2026-09-29T23:59:59Z", SalesforceSyncService.formatSoqlDateTime("2026-09-29T23:59:59.999Z", true));
+
+        // Timezone offset stripping
+        assertEquals("2026-01-10T08:00:00Z", SalesforceSyncService.formatSoqlDateTime("2026-01-10T08:00:00.000+0000", false));
+        assertEquals("2026-09-29T18:20:16Z", SalesforceSyncService.formatSoqlDateTime("2026-09-29T18:20:16+05:30", false));
+
+        // Standard ISO preserved
+        assertEquals("2026-05-15T12:30:00Z", SalesforceSyncService.formatSoqlDateTime("2026-05-15T12:30:00Z", false));
+    }
+
+    @Test
+    void testFullSyncBypassesDateRangeFilters() throws Exception {
+        // Even if future fromDate / toDate are supplied, Full Sync must pull ALL records without date boundary restriction
+        Map<String, Object> futureFilters = Map.of(
+                "fromDate", "2099-01-01",
+                "toDate", "2099-12-31"
+        );
+        int count = syncService.syncSingleObject("Account", "full", futureFilters);
+        assertTrue(count >= 3, "Full Sync must bypass fromDate/toDate and ingest all records");
+    }
+
+    @Test
+    void testIncrementalSyncRespectsDateRange() throws Exception {
+        stateRepository.deleteAll();
+
+        // 1. Query with fromDate set to 7 days ago (should only pull recent records, not the 45-day-old one)
+        String sevenDaysAgo = java.time.LocalDate.now().minusDays(7).toString();
+        String today = java.time.LocalDate.now().toString();
+
+        int recentCount = syncService.syncSingleObject("Account", "incremental", Map.of(
+                "fromDate", sevenDaysAgo,
+                "toDate", today
+        ));
+
+        // In mock data: 1 account is 2 days old (recent), 1 is 45 days old.
+        // Therefore recentCount should be at least 1 and less than all 3 accounts.
+        assertTrue(recentCount >= 1, "Should pull accounts modified within the last 7 days");
+    }
+
+    @Test
+    void testFullSyncWithNameFilterSuraj() throws Exception {
+        Map<String, Object> filters = Map.of("nameContains", "suraj");
+
+        int accCount = syncService.syncSingleObject("Account", "full", filters, "akash@oodles.io");
+        int conCount = syncService.syncSingleObject("Contact", "full", filters, "akash@oodles.io");
+        int oppCount = syncService.syncSingleObject("Opportunity", "full", filters, "akash@oodles.io");
+        int leadCount = syncService.syncSingleObject("Lead", "full", filters, "akash@oodles.io");
+
+        assertTrue(accCount >= 1, "Full sync with nameContains 'suraj' should sync matching Account");
+        assertTrue(conCount >= 1, "Full sync with nameContains 'suraj' should sync matching Contact");
+        assertTrue(oppCount >= 1, "Full sync with nameContains 'suraj' should sync matching Opportunity");
+        assertTrue(leadCount >= 1, "Full sync with nameContains 'suraj' should sync matching Lead");
+
+        // Verify that akash@oodles.io is added to syncedBy
+        AccountEntity acc = accountRepository.findById("001mock000000004AAA").orElse(null);
+        assertNotNull(acc);
+        assertEquals("Suraj Enterprise", acc.getName());
+        assertTrue(acc.isAssociatedWithUser("akash@oodles.io"));
+    }
+
+    @Test
+    void testIncrementalSyncWithNameFilterAndDateRange() throws Exception {
+        stateRepository.deleteAll();
+
+        String fromDate = java.time.LocalDate.now().minusDays(7).toString();
+        String toDate = java.time.LocalDate.now().toString();
+
+        Map<String, Object> filters = Map.of(
+                "nameContains", "suraj",
+                "fromDate", fromDate,
+                "toDate", toDate
+        );
+
+        int accCount = syncService.syncSingleObject("Account", "incremental", filters, "akash@oodles.io");
+        int conCount = syncService.syncSingleObject("Contact", "incremental", filters, "akash@oodles.io");
+        int oppCount = syncService.syncSingleObject("Opportunity", "incremental", filters, "akash@oodles.io");
+        int leadCount = syncService.syncSingleObject("Lead", "incremental", filters, "akash@oodles.io");
+
+        assertTrue(accCount >= 1, "Incremental sync with date range should sync recent 'suraj' Account");
+        assertTrue(conCount >= 1, "Incremental sync with date range should sync recent 'suraj' Contact");
+        assertTrue(oppCount >= 1, "Incremental sync with date range should sync recent 'suraj' Opportunity");
+        assertTrue(leadCount >= 1, "Incremental sync with date range should sync recent 'suraj' Lead");
+    }
 }

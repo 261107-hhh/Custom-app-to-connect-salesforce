@@ -47,7 +47,15 @@ public class SyncController {
             @SuppressWarnings("unchecked")
             Map<String, Object> filters = (Map<String, Object>) body.getOrDefault("filters", Map.of());
 
-            Map<String, Object> result = syncService.runSync(objects, mode, filters, userEmail);
+            String orgId = null;
+            if (body.containsKey("organizationId") && body.get("organizationId") != null) {
+                orgId = body.get("organizationId").toString();
+            }
+            if (orgId == null || !com.salesforce.sync.multitenancy.OrganizationContext.isValidOrgId(orgId)) {
+                orgId = com.salesforce.sync.multitenancy.OrganizationContext.getCurrentOrganization();
+            }
+
+            Map<String, Object> result = syncService.runSync(objects, mode, filters, userEmail, orgId);
             return ResponseEntity.ok(Map.of("success", true, "data", result));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "error", e.getMessage()));
@@ -64,10 +72,11 @@ public class SyncController {
     @Operation(summary = "Sync Audit History", description = "Returns the last 50 sync execution logs for the authenticated user.")
     public ResponseEntity<?> getHistory(Authentication authentication) {
         String userEmail = SecurityUtils.resolveUserEmail(authentication);
-        List<SyncHistoryEntity> history;
+        List<SyncHistoryEntity> history = List.of();
         if (userEmail != null && !userEmail.isBlank()) {
             history = historyRepo.findTop50ByUserEmailOrderByIdDesc(userEmail);
-        } else {
+        }
+        if (history.isEmpty()) {
             history = historyRepo.findTop50ByOrderByIdDesc();
         }
         return ResponseEntity.ok(Map.of("success", true, "data", history));

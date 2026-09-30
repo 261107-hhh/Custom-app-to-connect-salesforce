@@ -8,7 +8,7 @@ public final class OrganizationContext {
     private OrganizationContext() {}
 
     public static void setCurrentOrganization(String orgId) {
-        if (orgId != null && !orgId.isBlank()) {
+        if (isValidOrgId(orgId)) {
             CURRENT_ORG.set(orgId.trim());
         } else {
             CURRENT_ORG.remove();
@@ -17,7 +17,13 @@ public final class OrganizationContext {
 
     public static String getCurrentOrganization() {
         String orgId = CURRENT_ORG.get();
-        return (orgId != null && !orgId.isBlank()) ? orgId : DEFAULT_ORGANIZATION_ID;
+        return isValidOrgId(orgId) ? orgId.trim() : DEFAULT_ORGANIZATION_ID;
+    }
+
+    public static boolean isValidOrgId(String orgId) {
+        return orgId != null && !orgId.isBlank()
+                && !"undefined".equalsIgnoreCase(orgId.trim())
+                && !"null".equalsIgnoreCase(orgId.trim());
     }
 
     public static void clear() {

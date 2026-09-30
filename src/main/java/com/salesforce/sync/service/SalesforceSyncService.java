@@ -3,6 +3,7 @@ package com.salesforce.sync.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salesforce.sync.model.entity.*;
+import com.salesforce.sync.multitenancy.OrganizationContext;
 import com.salesforce.sync.repository.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,15 +66,21 @@ public class SalesforceSyncService {
     }
 
     public synchronized Map<String, Object> runSync(List<String> objects, String mode, Map<String, Object> filters) {
-        return runSync(objects, mode, filters, "cli@app.local");
+        return runSync(objects, mode, filters, "cli@app.local", OrganizationContext.getCurrentOrganization());
     }
 
     public synchronized Map<String, Object> runSync(List<String> objects, String mode, Map<String, Object> filters, String userEmail) {
+        return runSync(objects, mode, filters, userEmail, OrganizationContext.getCurrentOrganization());
+    }
+
+    public synchronized Map<String, Object> runSync(List<String> objects, String mode, Map<String, Object> filters, String userEmail, String orgId) {
         if ("running".equals(currentJob.get("status"))) {
             throw new IllegalStateException("A sync job is already in progress.");
         }
 
         String effectiveUser = (userEmail != null && !userEmail.isBlank()) ? userEmail : "cli@app.local";
+        String effectiveOrg = (orgId != null && OrganizationContext.isValidOrgId(orgId)) ? orgId : OrganizationContext.getCurrentOrganization();
+
         String jobId = "job-" + System.currentTimeMillis();
         currentJob.put("id", jobId);
         currentJob.put("status", "running");
@@ -82,24 +89,23 @@ public class SalesforceSyncService {
         currentJob.put("objects", objects);
         currentJob.put("mode", mode);
         currentJob.put("userEmail", effectiveUser);
+        currentJob.put("organizationId", effectiveOrg);
         currentJob.put("totalRecordsSynced", 0);
-        currentJob.put("filters", Map.of());
+        currentJob.put("filters", filters != null ? filters : Map.of());
         currentJob.put("details", new ConcurrentHashMap<String, Object>());
         currentJob.put("startedAt", LocalDateTime.now().toString());
         currentJob.put("finishedAt", null);
         currentJob.put("error", null);
         currentJob.put("logs", new java.util.concurrent.CopyOnWriteArrayList<Map<String, String>>());
 
-        currentJob.put("filters", filters != null ? filters : Map.of());
-
         StringBuilder startMsg = new StringBuilder("Sync process started (" + mode + ") for objects: " + String.join(", ", objects));
         if (filters != null && !filters.isEmpty()) {
             startMsg.append(" with filters: ").append(filters);
         }
-        startMsg.append(" [User: ").append(effectiveUser).append("]");
+        startMsg.append(" [User: ").append(effectiveUser).append(", Org: ").append(effectiveOrg).append("]");
         appendLog(startMsg.toString(), "info");
 
-        executeSyncAsync(objects, mode, filters, effectiveUser);
+        executeSyncAsync(objects, mode, filters, effectiveUser, effectiveOrg);
 
         return new HashMap<>(currentJob);
     }
@@ -115,6 +121,7 @@ public class SalesforceSyncService {
         currentJob.put("currentObject", null);
         currentJob.put("objects", List.of());
         currentJob.put("mode", null);
+        currentJob.put("organizationId", null);
         currentJob.put("totalRecordsSynced", 0);
         currentJob.put("details", new ConcurrentHashMap<String, Object>());
         currentJob.put("startedAt", null);
@@ -124,7 +131,8 @@ public class SalesforceSyncService {
     }
 
     @Async
-    public void executeSyncAsync(List<String> objects, String mode, Map<String, Object> filters, String userEmail) {
+    public void executeSyncAsync(List<String> objects, String mode, Map<String, Object> filters, String userEmail, String orgId) {
+        OrganizationContext.setCurrentOrganization(orgId);
         int totalObjects = objects.size();
         int completed = 0;
 
@@ -139,7 +147,7 @@ public class SalesforceSyncService {
                 String errMsg = null;
 
                 try {
-                    recordsSynced = syncSingleObject(objectName, mode, filters, userEmail);
+                    recordsSynced = syncSingleObject(objectName, mode, filters, userEmail, orgId);
                     appendLog("Successfully synced " + recordsSynced + " records for object: " + objectName, "success");
 
                     @SuppressWarnings("unchecked")
@@ -205,21 +213,27 @@ public class SalesforceSyncService {
             currentJob.put("currentObject", null);
             currentJob.put("finishedAt", LocalDateTime.now().toString());
             appendLog("All sync tasks finished. Total records synced: " + currentJob.get("totalRecordsSynced"), "success");
-        } catch (Exception e) {
-            currentJob.put("status", "failed");
-            currentJob.put("error", e.getMessage());
-            appendLog("Sync process failed: " + e.getMessage(), "error");
+        } finally {
+            OrganizationContext.clear();
         }
     }
 
     @Transactional
     public int syncSingleObject(String objectName, String mode, Map<String, Object> filters) throws Exception {
-        return syncSingleObject(objectName, mode, filters, "cli@app.local");
+        return syncSingleObject(objectName, mode, filters, "cli@app.local", OrganizationContext.getCurrentOrganization());
     }
 
     @Transactional
     public int syncSingleObject(String objectName, String mode, Map<String, Object> filters, String userEmail) throws Exception {
+        return syncSingleObject(objectName, mode, filters, userEmail, OrganizationContext.getCurrentOrganization());
+    }
+
+    @Transactional
+    public int syncSingleObject(String objectName, String mode, Map<String, Object> filters, String userEmail, String orgId) throws Exception {
         String effectiveUser = (userEmail != null && !userEmail.isBlank()) ? userEmail : "cli@app.local";
+        String effectiveOrg = (orgId != null && OrganizationContext.isValidOrgId(orgId)) ? orgId : OrganizationContext.getCurrentOrganization();
+        OrganizationContext.setCurrentOrganization(effectiveOrg);
+
         String lastModstamp = null;
         if ("incremental".equalsIgnoreCase(mode)) {
             Optional<SyncStateEntity> stateOpt = stateRepo.findById(objectName);
@@ -247,41 +261,47 @@ public class SalesforceSyncService {
 
         List<String> whereClauses = new ArrayList<>();
 
-        // Extract from/to date range for incremental or custom range sync
-        String fromDate = null;
-        if (filters.containsKey("fromDate") && filters.get("fromDate") != null && !filters.get("fromDate").toString().isBlank()) {
-            fromDate = filters.get("fromDate").toString().trim();
-        } else if (filters.containsKey("modifiedFrom") && filters.get("modifiedFrom") != null && !filters.get("modifiedFrom").toString().isBlank()) {
-            fromDate = filters.get("modifiedFrom").toString().trim();
-        } else if (filters.containsKey("startDate") && filters.get("startDate") != null && !filters.get("startDate").toString().isBlank()) {
-            fromDate = filters.get("startDate").toString().trim();
-        }
+        // Apply Incremental / Date Range constraints strictly when mode is 'incremental'
+        if ("incremental".equalsIgnoreCase(mode)) {
+            // Extract from/to date range for incremental or custom range sync
+            String fromDate = null;
+            if (filters.containsKey("fromDate") && filters.get("fromDate") != null && !filters.get("fromDate").toString().isBlank()) {
+                fromDate = filters.get("fromDate").toString().trim();
+            } else if (filters.containsKey("modifiedFrom") && filters.get("modifiedFrom") != null && !filters.get("modifiedFrom").toString().isBlank()) {
+                fromDate = filters.get("modifiedFrom").toString().trim();
+            } else if (filters.containsKey("startDate") && filters.get("startDate") != null && !filters.get("startDate").toString().isBlank()) {
+                fromDate = filters.get("startDate").toString().trim();
+            }
 
-        String toDate = null;
-        if (filters.containsKey("toDate") && filters.get("toDate") != null && !filters.get("toDate").toString().isBlank()) {
-            toDate = filters.get("toDate").toString().trim();
-        } else if (filters.containsKey("modifiedTo") && filters.get("modifiedTo") != null && !filters.get("modifiedTo").toString().isBlank()) {
-            toDate = filters.get("modifiedTo").toString().trim();
-        } else if (filters.containsKey("endDate") && filters.get("endDate") != null && !filters.get("endDate").toString().isBlank()) {
-            toDate = filters.get("endDate").toString().trim();
-        }
+            String toDate = null;
+            if (filters.containsKey("toDate") && filters.get("toDate") != null && !filters.get("toDate").toString().isBlank()) {
+                toDate = filters.get("toDate").toString().trim();
+            } else if (filters.containsKey("modifiedTo") && filters.get("modifiedTo") != null && !filters.get("modifiedTo").toString().isBlank()) {
+                toDate = filters.get("modifiedTo").toString().trim();
+            } else if (filters.containsKey("endDate") && filters.get("endDate") != null && !filters.get("endDate").toString().isBlank()) {
+                toDate = filters.get("endDate").toString().trim();
+            }
 
-        // If user explicitly configured a From Date, query records modified on or after that date.
-        // Otherwise, if incremental mode and a previous sync timestamp exists, use SystemModstamp > lastModstamp.
-        if (fromDate != null) {
-            String isoFrom = fromDate.contains("T") ? fromDate : fromDate + "T00:00:00.000Z";
-            whereClauses.add("LastModifiedDate >= " + isoFrom);
-            appendLog("Date range applied: LastModifiedDate >= " + isoFrom, "info");
-        } else if ("incremental".equalsIgnoreCase(mode) && lastModstamp != null && !lastModstamp.isBlank()) {
-            whereClauses.add("SystemModstamp > " + lastModstamp);
-            appendLog("Incremental filter applied: SystemModstamp > " + lastModstamp, "info");
-        }
+            // If user explicitly configured a From Date, query records modified on or after that date.
+            // Otherwise, if incremental mode and a previous sync timestamp exists, use SystemModstamp > lastModstamp.
+            if (fromDate != null) {
+                String isoFrom = formatSoqlDateTime(fromDate, false);
+                whereClauses.add("LastModifiedDate >= " + isoFrom);
+                appendLog("Incremental date range applied: LastModifiedDate >= " + isoFrom, "info");
+            } else if (lastModstamp != null && !lastModstamp.isBlank()) {
+                String isoLastMod = formatSoqlDateTime(lastModstamp, false);
+                whereClauses.add("SystemModstamp > " + isoLastMod);
+                appendLog("Incremental delta filter applied: SystemModstamp > " + isoLastMod, "info");
+            }
 
-        // Apply To Date constraint (defaulted to current date in UI)
-        if (toDate != null) {
-            String isoTo = toDate.contains("T") ? toDate : toDate + "T23:59:59.999Z";
-            whereClauses.add("LastModifiedDate <= " + isoTo);
-            appendLog("Date range applied: LastModifiedDate <= " + isoTo, "info");
+            // Apply To Date constraint (only in incremental mode)
+            if (toDate != null) {
+                String isoTo = formatSoqlDateTime(toDate, true);
+                whereClauses.add("LastModifiedDate <= " + isoTo);
+                appendLog("Incremental date range applied: LastModifiedDate <= " + isoTo, "info");
+            }
+        } else {
+            appendLog("Full snapshot mode active: fetching all records without date boundaries", "info");
         }
 
         // Handle user filters
@@ -292,19 +312,24 @@ public class SalesforceSyncService {
             nameFilter = filters.get("nameContains").toString().trim();
         }
         if (nameFilter != null) {
-            whereClauses.add("Name LIKE '%" + nameFilter.replace("'", "\\'") + "%'");
+            String sanitized = nameFilter.replace("'", "\\'");
+            if ("Contact".equalsIgnoreCase(objectName) || "Lead".equalsIgnoreCase(objectName)) {
+                whereClauses.add("(Name LIKE '%" + sanitized + "%' OR FirstName LIKE '%" + sanitized + "%' OR LastName LIKE '%" + sanitized + "%')");
+            } else {
+                whereClauses.add("Name LIKE '%" + sanitized + "%'");
+            }
             appendLog("Filter applied: Name LIKE '%" + nameFilter + "%'", "info");
         }
 
         if (filters.containsKey("createdFrom") && filters.get("createdFrom") != null && !filters.get("createdFrom").toString().isBlank()) {
             String val = filters.get("createdFrom").toString().trim();
-            String isoDate = val.contains("T") ? val : val + "T00:00:00.000Z";
+            String isoDate = formatSoqlDateTime(val, false);
             whereClauses.add("CreatedDate >= " + isoDate);
             appendLog("Filter applied: CreatedDate >= " + isoDate, "info");
         }
         if (filters.containsKey("createdTo") && filters.get("createdTo") != null && !filters.get("createdTo").toString().isBlank()) {
             String val = filters.get("createdTo").toString().trim();
-            String isoDate = val.contains("T") ? val : val + "T23:59:59.999Z";
+            String isoDate = formatSoqlDateTime(val, true);
             whereClauses.add("CreatedDate <= " + isoDate);
             appendLog("Filter applied: CreatedDate <= " + isoDate, "info");
         }
@@ -328,7 +353,7 @@ public class SalesforceSyncService {
                 String sysMod = r.path("SystemModstamp").asText(null);
                 if (sysMod != null) latestStamp = sysMod;
 
-                upsertEntity(objectName, id, r, effectiveUser, describeNode);
+                upsertEntity(objectName, id, r, effectiveUser, effectiveOrg, describeNode);
                 count++;
             }
         }
@@ -340,7 +365,7 @@ public class SalesforceSyncService {
             state.setLastSyncTimestamp(latestStamp);
         }
         state.setLastSyncMode(mode);
-        state.setTotalRecords(getObjectCountByUser(objectName, effectiveUser));
+        state.setTotalRecords(getObjectCount(objectName));
         state.setLastStatus("SUCCESS");
         state.setUpdatedAt(LocalDateTime.now());
         stateRepo.save(state);
@@ -348,9 +373,10 @@ public class SalesforceSyncService {
         return count;
     }
 
-    private void upsertEntity(String objectName, String id, JsonNode r, String userEmail, JsonNode describeNode) {
+    private void upsertEntity(String objectName, String id, JsonNode r, String userEmail, String orgId, JsonNode describeNode) {
         Map<String, Object> rawMap = objectMapper.convertValue(r, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
         Map<String, Object> normalized = schemaRegistry.normalizeRecord(objectName, rawMap, describeNode);
+        normalized.remove("synced_by");
         String rawData;
         try {
             rawData = objectMapper.writeValueAsString(normalized);
@@ -362,6 +388,7 @@ public class SalesforceSyncService {
         if ("Account".equalsIgnoreCase(objectName)) {
             AccountEntity acc = accountRepo.findById(id).orElse(new AccountEntity());
             acc.setId(id);
+            acc.setOrganizationId(orgId);
             acc.setName(getStringValue(normalized, "Name"));
             acc.setType(getStringValue(normalized, "Type"));
             acc.setIndustry(getStringValue(normalized, "Industry"));
@@ -378,12 +405,13 @@ public class SalesforceSyncService {
             acc.setSystemModstamp(getStringValue(normalized, "SystemModstamp"));
             acc.setRawData(rawData);
             acc.setSyncedAt(syncedAt);
-            // CRITICAL: Attribute sync to authenticated user while preserving local custom app creation
+            // CRITICAL: Attribute sync to authenticated user and organization
             acc.addSyncedBy(userEmail);
             accountRepo.save(acc);
         } else if ("Contact".equalsIgnoreCase(objectName)) {
             ContactEntity con = contactRepo.findById(id).orElse(new ContactEntity());
             con.setId(id);
+            con.setOrganizationId(orgId);
             con.setName(getStringValue(normalized, "Name"));
             con.setFirstName(getStringValue(normalized, "FirstName"));
             con.setLastName(getStringValue(normalized, "LastName"));
@@ -406,6 +434,7 @@ public class SalesforceSyncService {
         } else if ("Opportunity".equalsIgnoreCase(objectName)) {
             OpportunityEntity opp = opportunityRepo.findById(id).orElse(new OpportunityEntity());
             opp.setId(id);
+            opp.setOrganizationId(orgId);
             opp.setName(getStringValue(normalized, "Name"));
             opp.setStageName(getStringValue(normalized, "StageName"));
             if (normalized.get("Amount") != null && !normalized.get("Amount").toString().isBlank()) {
@@ -435,6 +464,7 @@ public class SalesforceSyncService {
         } else if ("Lead".equalsIgnoreCase(objectName)) {
             LeadEntity lead = leadRepo.findById(id).orElse(new LeadEntity());
             lead.setId(id);
+            lead.setOrganizationId(orgId);
             lead.setName(getStringValue(normalized, "Name"));
             lead.setFirstName(getStringValue(normalized, "FirstName"));
             lead.setLastName(getStringValue(normalized, "LastName"));
@@ -468,7 +498,7 @@ public class SalesforceSyncService {
         return 0L;
     }
 
-    private long getObjectCount(String objectName) {
+    public long getObjectCount(String objectName) {
         if ("Account".equalsIgnoreCase(objectName)) return accountRepo.count();
         if ("Contact".equalsIgnoreCase(objectName)) return contactRepo.count();
         if ("Opportunity".equalsIgnoreCase(objectName)) return opportunityRepo.count();
@@ -493,5 +523,54 @@ public class SalesforceSyncService {
                 logs.remove(0);
             }
         }
+    }
+
+    /**
+     * Sanitizes any date or ISO timestamp string into a valid Salesforce SOQL dateTime literal.
+     * Salesforce SOQL strictly requires: YYYY-MM-DDTHH:mm:ssZ (or with timezone offset).
+     * SOQL does NOT support fractional milliseconds (e.g. .000Z or .999Z will throw MALFORMED_QUERY).
+     */
+    public static String formatSoqlDateTime(String input, boolean isEndOfDay) {
+        if (input == null || input.isBlank()) return null;
+        String s = input.trim().replace("'", "");
+
+        // 1. Date-only format (YYYY-MM-DD)
+        if (s.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+            return isEndOfDay ? s + "T23:59:59Z" : s + "T00:00:00Z";
+        }
+
+        // 2. Contains time (contains 'T')
+        if (s.contains("T")) {
+            int tIndex = s.indexOf('T');
+            String datePart = s.substring(0, tIndex);
+            String timePart = s.substring(tIndex + 1);
+
+            // Strip any fractional milliseconds (.000, .999, etc.)
+            int dotIdx = timePart.indexOf('.');
+            if (dotIdx != -1) {
+                timePart = timePart.substring(0, dotIdx);
+            } else {
+                // Strip timezone offset (+05:30, -04:00, etc.) or trailing Z
+                int plusIdx = timePart.indexOf('+');
+                int minusIdx = timePart.indexOf('-');
+                if (plusIdx != -1) {
+                    timePart = timePart.substring(0, plusIdx);
+                } else if (minusIdx != -1) {
+                    timePart = timePart.substring(0, minusIdx);
+                } else if (timePart.endsWith("Z") || timePart.endsWith("z")) {
+                    timePart = timePart.substring(0, timePart.length() - 1);
+                }
+            }
+
+            if (timePart.matches("^\\d{2}:\\d{2}$")) {
+                timePart = timePart + (isEndOfDay ? ":59" : ":00");
+            } else if (!timePart.matches("^\\d{2}:\\d{2}:\\d{2}$")) {
+                timePart = isEndOfDay ? "23:59:59" : "00:00:00";
+            }
+
+            return datePart + "T" + timePart + "Z";
+        }
+
+        return s;
     }
 }
