@@ -8,13 +8,11 @@ target/
 *.ear
 
 # Environment & credentials
-.env
 data/
 
 # IDE & Editor settings
 .idea/
 *.iml
-.vscode/
 .project
 .classpath
 .settings/
@@ -26,3 +24,5 @@ data/
 Thumbs.db
 Desktop.ini
 .DS_Store
+config.bat
+node_modules

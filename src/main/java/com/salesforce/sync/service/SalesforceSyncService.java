@@ -21,6 +21,7 @@ public class SalesforceSyncService {
     private static final Logger log = LoggerFactory.getLogger(SalesforceSyncService.class);
 
     private final SalesforceClientService sfClient;
+    private final MultiTenantSalesforceClientProvider clientProvider;
     private final AccountRepository accountRepo;
     private final ContactRepository contactRepo;
     private final OpportunityRepository opportunityRepo;
@@ -40,10 +41,9 @@ public class SalesforceSyncService {
                                  SyncHistoryRepository historyRepo,
                                  SyncStateRepository stateRepo,
                                  ObjectMapper objectMapper) {
-        this(sfClient, accountRepo, contactRepo, opportunityRepo, leadRepo, historyRepo, stateRepo, objectMapper, new SalesforceSchemaRegistry());
+        this(sfClient, null, accountRepo, contactRepo, opportunityRepo, leadRepo, historyRepo, stateRepo, objectMapper, new SalesforceSchemaRegistry());
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
     public SalesforceSyncService(SalesforceClientService sfClient,
                                  AccountRepository accountRepo,
                                  ContactRepository contactRepo,
@@ -53,7 +53,22 @@ public class SalesforceSyncService {
                                  SyncStateRepository stateRepo,
                                  ObjectMapper objectMapper,
                                  SalesforceSchemaRegistry schemaRegistry) {
+        this(sfClient, null, accountRepo, contactRepo, opportunityRepo, leadRepo, historyRepo, stateRepo, objectMapper, schemaRegistry);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SalesforceSyncService(SalesforceClientService sfClient,
+                                 @org.springframework.beans.factory.annotation.Autowired(required = false) MultiTenantSalesforceClientProvider clientProvider,
+                                 AccountRepository accountRepo,
+                                 ContactRepository contactRepo,
+                                 OpportunityRepository opportunityRepo,
+                                 LeadRepository leadRepo,
+                                 SyncHistoryRepository historyRepo,
+                                 SyncStateRepository stateRepo,
+                                 ObjectMapper objectMapper,
+                                 SalesforceSchemaRegistry schemaRegistry) {
         this.sfClient = sfClient;
+        this.clientProvider = clientProvider;
         this.accountRepo = accountRepo;
         this.contactRepo = contactRepo;
         this.opportunityRepo = opportunityRepo;
@@ -234,6 +249,15 @@ public class SalesforceSyncService {
         String effectiveOrg = (orgId != null && OrganizationContext.isValidOrgId(orgId)) ? orgId : OrganizationContext.getCurrentOrganization();
         OrganizationContext.setCurrentOrganization(effectiveOrg);
 
+        // Resolve tenant-specific Salesforce Client
+        SalesforceClientService client = (clientProvider != null)
+                ? clientProvider.getClientForOrganization(effectiveOrg)
+                : this.sfClient;
+
+        if (!client.isConnected()) {
+            throw new IllegalStateException("Salesforce is not connected for organization '" + effectiveOrg + "'. Please configure and connect Salesforce in Settings.");
+        }
+
         String lastModstamp = null;
         if ("incremental".equalsIgnoreCase(mode)) {
             Optional<SyncStateEntity> stateOpt = stateRepo.findById(objectName);
@@ -245,7 +269,7 @@ public class SalesforceSyncService {
         // Introspect object describe to dynamically query ALL fields from Salesforce
         JsonNode describeNode = null;
         try {
-            describeNode = sfClient.describeObject(objectName);
+            describeNode = client.describeObject(objectName);
         } catch (Exception e) {
             log.warn("[SyncService] Could not describe {}: {}", objectName, e.getMessage());
         }
@@ -341,7 +365,7 @@ public class SalesforceSyncService {
         soql.append(" ORDER BY SystemModstamp ASC LIMIT 2000");
 
         appendLog("Executing SOQL: " + soql, "info");
-        JsonNode queryRes = sfClient.query(soql.toString());
+        JsonNode queryRes = client.query(soql.toString());
 
         JsonNode recordsNode = queryRes.path("records");
         int count = 0;
@@ -374,6 +398,22 @@ public class SalesforceSyncService {
     }
 
     private void upsertEntity(String objectName, String id, JsonNode r, String userEmail, String orgId, JsonNode describeNode) {
+        if (id == null || id.isBlank()) {
+            log.warn("[SyncService] Skipped record without Id for {}", objectName);
+            return;
+        }
+
+        // Anti-pollution: Never allow mock records to pollute database if org is not configured for mock
+        if (id.toLowerCase().contains("mock")) {
+            SalesforceClientService currentClient = (clientProvider != null)
+                    ? clientProvider.getClientForOrganization(orgId)
+                    : this.sfClient;
+            if (!currentClient.isMock()) {
+                log.warn("[AntiPollution] Blocked mock record {} from entering database for organization {}", id, orgId);
+                return;
+            }
+        }
+
         Map<String, Object> rawMap = objectMapper.convertValue(r, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
         Map<String, Object> normalized = schemaRegistry.normalizeRecord(objectName, rawMap, describeNode);
         normalized.remove("synced_by");
